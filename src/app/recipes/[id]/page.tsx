@@ -1,5 +1,4 @@
-
-import React, { ReactElement } from "react";
+import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -15,20 +14,19 @@ import {
 } from "@/components/ui/card";
 import { RecipeInteraction } from "@/components/recipe-interaction";
 
-interface RecipePageProps {
+interface Props {
   params: {
     id: string;
   };
 }
 
-const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> => {
+const RecipePage = async ({ params }: Props) => {
   const recipe = await fetchRecipeById(params.id);
 
   if (!recipe) {
     notFound();
   }
 
-  // Fetch tips separately to keep initial load fast and update dynamically
   const initialTips = await fetchTipsForRecipe(params.id);
 
   return (
@@ -65,6 +63,7 @@ const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> =>
                 width={800}
                 height={400}
                 className="w-full h-full object-cover"
+                priority
               />
             </Card>
           </div>
@@ -93,7 +92,9 @@ const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> =>
                     <div>
                       <p><strong>Recommended for:</strong></p>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        {recipe.consumption_time.map(time => <Badge key={time} variant="outline">{time}</Badge>)}
+                        {recipe.consumption_time.map(time => (
+                          <Badge key={time} variant="outline">{time}</Badge>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -103,7 +104,9 @@ const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> =>
                       <p><strong>Dietary Info:</strong></p>
                       <div className="flex flex-wrap gap-2 mt-1">
                         <Badge variant="secondary">{recipe.dietary_type}</Badge>
-                        {recipe.dietary_notes.map(note => <Badge key={note} variant="outline">{note}</Badge>)}
+                        {recipe.dietary_notes.map(note => (
+                          <Badge key={note} variant="outline">{note}</Badge>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -124,8 +127,11 @@ const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> =>
               </Card>
             </div>
             
-            <RecipeInteraction recipeId={recipe.id} steps={recipe.steps} initialTips={initialTips} />
-
+            <RecipeInteraction 
+              recipeId={recipe.id} 
+              steps={recipe.steps} 
+              initialTips={initialTips} 
+            />
           </div>
         </article>
       </div>
