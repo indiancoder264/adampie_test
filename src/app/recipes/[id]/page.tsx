@@ -132,3 +132,4 @@ export default async function RecipePage({ params }: { params: { id: string } })
     </div>
   );
 }
+ 
