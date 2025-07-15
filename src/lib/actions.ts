@@ -55,7 +55,7 @@ export async function loginAction(data: { email: string; password: string;}) {
     const adminEmail = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
-    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
+    if (adminEmail && adminPassword === adminEmail &&  adminPassword) {
         const adminUserSessionData: User = {
             id: 'admin-user',
             name: 'Admin',
