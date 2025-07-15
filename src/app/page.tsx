@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { RecipeCard } from '@/components/recipe-card';
@@ -19,6 +19,8 @@ import type { Recipe } from '@/lib/recipes';
 import { SearchAndFilter } from '@/components/search-and-filter';
 import { useRecipes } from '@/lib/recipes';
 import { useSearchParams } from 'next/navigation';
+import { Skeleton } from '@/components/ui/skeleton';
+
 
 function SearchResults({ query, meal, time }: { query: string; meal: string; time: string; }) {
     const { recipes } = useRecipes();
@@ -76,8 +78,7 @@ function SearchResults({ query, meal, time }: { query: string; meal: string; tim
     );
 }
 
-
-export default function Home() {
+function HomepageContent() {
   const { recipes } = useRecipes();
   const searchParams = useSearchParams();
 
@@ -188,4 +189,44 @@ export default function Home() {
       )}
     </div>
   );
+}
+
+
+function HomepageSkeleton() {
+  return (
+    <div className="container mx-auto px-4 py-8">
+      {/* Hero Skeleton */}
+      <Skeleton className="mb-12 h-80 w-full rounded-lg" />
+      
+      {/* Carousel Skeleton */}
+      <div className="mb-12">
+        <Skeleton className="h-10 w-1/3 mb-6" />
+        <div className="flex space-x-6 overflow-hidden">
+          <Skeleton className="h-72 w-full sm:w-1/2 md:w-1/3 lg:w-1/4" />
+          <Skeleton className="h-72 w-full sm:w-1/2 md:w-1/3 lg:w-1/4" />
+          <Skeleton className="h-72 w-full sm:w-1/2 md:w-1/3 lg:w-1/4" />
+          <Skeleton className="h-72 w-full sm:w-1/2 md:w-1/3 lg:w-1/4" />
+        </div>
+      </div>
+       
+       {/* Section Skeleton */}
+      <div className="mb-12">
+        <Skeleton className="h-10 w-1/3 mb-6" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+    return (
+        <Suspense fallback={<HomepageSkeleton />}>
+            <HomepageContent />
+        </Suspense>
+    );
 }
