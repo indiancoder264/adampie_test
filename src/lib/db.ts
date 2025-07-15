@@ -8,17 +8,14 @@ declare global {
 
 const getPool = () => {
   if (!global.pool) {
-    let connectionString = process.env.POSTGRES_URL;
+    const connectionString = process.env.POSTGRES_URL;
 
-    if (!connectionString) {
+    // Be very strict. If the variable is missing or doesn't look like a real URL, fail fast.
+    // This prevents the app from trying to connect to localhost in a deployed environment.
+    if (!connectionString || !connectionString.startsWith('postgres')) {
       throw new Error(
-        'Database connection string not found. Please set the POSTGRES_URL environment variable in your .env file.'
+        'A valid PostgreSQL connection string was not found. Please set the POSTGRES_URL environment variable in your deployment settings.'
       );
-    }
-    
-    // Defensive check to fix malformed connection strings from build environment
-    if (connectionString && !connectionString.startsWith('postgresql://')) {
-        connectionString = `postgresql:${connectionString.startsWith('//') ? '' : '//'}${connectionString.replace('//', '')}`;
     }
     
     console.log('Creating new PostgreSQL connection pool.');

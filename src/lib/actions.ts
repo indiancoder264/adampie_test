@@ -1,4 +1,3 @@
-
 "use server";
 
 import { cookies } from "next/headers";
@@ -55,7 +54,7 @@ export async function loginAction(data: { email: string; password: string;}) {
     const adminEmail = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
-    if (adminEmail && adminPassword === adminEmail &&  adminPassword) {
+    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
         const adminUserSessionData: User = {
             id: 'admin-user',
             name: 'Admin',
