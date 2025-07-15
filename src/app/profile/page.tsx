@@ -70,13 +70,13 @@ export default function ProfilePage() {
 
   const createdGroups = React.useMemo(() => {
     if (!user) return [];
-    return groups.filter(g => g.creatorId === user.id);
+    return groups.filter(g => g.creator_id === user.id);
   }, [groups, user]);
 
   const memberGroups = React.useMemo(() => {
     if (!user) return [];
     // Exclude groups they created from the "member of" list
-    return groups.filter(g => g.members.includes(user.id) && g.creatorId !== user.id);
+    return groups.filter(g => g.members.includes(user.id) && g.creator_id !== user.id);
   }, [groups, user]);
 
   if (!user) {
@@ -121,7 +121,7 @@ export default function ProfilePage() {
 
   const userTips = recipes.flatMap(recipe =>
     (recipe.tips || [])
-      .filter(tip => tip.userId === user.id)
+      .filter(tip => tip.user_id === user.id)
       .map(tip => ({ tip, recipe }))
   );
   
@@ -348,3 +348,4 @@ export default function ProfilePage() {
     </div>
   );
 }
+
