@@ -42,11 +42,11 @@ function VerificationComponent() {
     const result = await verifyOtpAction(email, otp);
     if (result.success) {
       setStatus('success');
-      setMessage(result.message);
+      setMessage(result.message || 'Verification successful! Redirecting...');
       setTimeout(() => router.push('/login'), 2000); // Redirect to login after a short delay
     } else {
       setStatus('error');
-      setMessage(result.error);
+      setMessage(result.error || 'An unknown error occurred.');
     }
   };
   
