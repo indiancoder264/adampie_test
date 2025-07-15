@@ -1,5 +1,4 @@
-
-import React from "react";
+import React, { ReactElement } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -16,8 +15,13 @@ import {
 import { RecipeInteraction } from "@/components/recipe-interaction";
 import { StarRating } from "@/components/star-rating";
 
+interface RecipePageProps {
+  params: {
+    id: string;
+  };
+}
 
-export default async function RecipePage({ params }: { params: { id: string } }) {
+const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> => {
   const recipe = await fetchRecipeById(params.id);
 
   if (!recipe) {
@@ -131,5 +135,6 @@ export default async function RecipePage({ params }: { params: { id: string } })
       </div>
     </div>
   );
-}
- 
+};
+
+export default RecipePage;
