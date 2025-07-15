@@ -14,7 +14,7 @@ import { Resend } from 'resend';
 
 
 // --- Permission Check ---
-const getAuthenticatedUser = async (): Promise<User | null> => {
+const getAuthenticatedUser = (): User | null => {
   const cookieStore = cookies();
   const userCookie = cookieStore.get("user");
   if (!userCookie) return null;
@@ -263,7 +263,7 @@ function parseIngredient(ingredientString: string): { quantity: string, name: st
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user?.isAdmin) {
         return { success: false, error: "Unauthorized" };
     }
@@ -398,7 +398,7 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 
 
 export async function deleteRecipeAction(recipeId: string) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
   const pool = getPool();
@@ -417,7 +417,7 @@ export async function deleteRecipeAction(recipeId: string) {
 }
 
 export async function togglePublishAction(recipeId: string) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
   const pool = getPool();
@@ -440,7 +440,7 @@ export async function togglePublishAction(recipeId: string) {
 }
 
 export async function deleteTipAction(recipeId: string, tipId: string) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
   const pool = getPool();
@@ -489,7 +489,7 @@ export async function createGroupAction(data: { name: string; description: strin
 }
 
 export async function deleteGroupAction(groupId: string) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user?.isAdmin) {
     return { success: false, error: "Unauthorized" };
   }
@@ -510,7 +510,7 @@ export async function deleteGroupAction(groupId: string) {
 }
 
 export async function editGroupAction(groupId: string, data: { name: string, description: string }) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user) return { success: false, error: "Unauthorized" };
 
   const pool = getPool();
@@ -539,7 +539,7 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 // --- Community Content Actions ---
 
 export async function addPostAction(groupId: string, content: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     const pool = getPool();
     const client = await pool.connect();
@@ -559,7 +559,7 @@ export async function addPostAction(groupId: string, content: string) {
 }
 
 export async function editPostAction(postId: string, content: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "Unauthorized" };
 
     const pool = getPool();
@@ -582,7 +582,7 @@ export async function editPostAction(postId: string, content: string) {
 }
 
 export async function deletePostAction(postId: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "Unauthorized" };
 
     const pool = getPool();
@@ -608,7 +608,7 @@ export async function deletePostAction(postId: string) {
 }
 
 export async function addCommentAction(postId: string, content: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     const pool = getPool();
     const client = await pool.connect();
@@ -633,7 +633,7 @@ export async function addCommentAction(postId: string, content: string) {
 }
 
 export async function editCommentAction(commentId: string, content: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "Unauthorized" };
     const pool = getPool();
     const client = await pool.connect();
@@ -655,7 +655,7 @@ export async function editCommentAction(commentId: string, content: string) {
 }
 
 export async function deleteCommentAction(commentId: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "Unauthorized" };
     const pool = getPool();
     const client = await pool.connect();
@@ -680,7 +680,7 @@ export async function deleteCommentAction(commentId: string) {
 }
 
 export async function togglePostReactionAction(postId: string, reaction: 'like' | 'dislike') {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     const pool = getPool();
     const client = await pool.connect();
@@ -715,7 +715,7 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
 }
 
 export async function reportContentAction(contentId: string, contentType: 'post' | 'comment', reason: string, details?: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     const pool = getPool();
     const client = await pool.connect();
@@ -746,7 +746,7 @@ export async function reportContentAction(contentId: string, contentType: 'post'
 // --- User Actions ---
 
 export async function deleteUserAction(userId: string) {
-  const user = await getAuthenticatedUser();
+  const user = getAuthenticatedUser();
   if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
   const pool = getPool();
@@ -764,7 +764,7 @@ export async function deleteUserAction(userId: string) {
 }
 
 export async function suspendUserAction(userId: string, days: number) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
     const pool = getPool();
@@ -785,7 +785,7 @@ export async function suspendUserAction(userId: string, days: number) {
 }
 
 export async function unsuspendUserAction(userId: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -804,7 +804,7 @@ export async function unsuspendUserAction(userId: string) {
 
 
 export async function joinGroupAction(groupId: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     
     const pool = getPool();
@@ -827,7 +827,7 @@ export async function joinGroupAction(groupId: string) {
 
 
 export async function leaveGroupAction(groupId: string) {
-    const user = await getAuthenticatedUser();
+    const user = getAuthenticatedUser();
     if (!user) return { success: false, error: "You must be logged in." };
     
     const pool = getPool();
@@ -847,3 +847,4 @@ export async function leaveGroupAction(groupId: string) {
         client.release();
     }
 }
+
