@@ -14,11 +14,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { RecipeInteraction } from "@/components/recipe-interaction";
-
-// We must import this dynamically because it's a client component with hooks
-const StarRating = React.lazy(() => 
-  import('@/components/star-rating').then(module => ({ default: module.StarRating }))
-);
+import { StarRating } from "@/components/star-rating";
 
 
 export default async function RecipePage({ params }: { params: { id: string } }) {
