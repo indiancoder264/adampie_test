@@ -1,8 +1,8 @@
 
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import getPool from './db';
 import type { User } from "./auth";
 import type { Recipe, Tip } from "./recipes";
@@ -259,6 +259,7 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
             user = null;
         }
     }
+
     if (!user?.isAdmin) {
         return { success: false, error: "Unauthorized" };
     }
@@ -986,5 +987,3 @@ export async function leaveGroupAction(groupId: string) {
         client.release();
     }
 }
-
-
