@@ -1,9 +1,10 @@
+
 import React, { ReactElement } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchRecipeById, fetchTipsForRecipe } from '@/lib/data';
-import { Clock, Users, Star, ArrowLeft, Utensils, Salad, Calendar } from "lucide-react";
+import { Clock, Users, ArrowLeft, Utensils, Salad, Calendar } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,6 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { RecipeInteraction } from "@/components/recipe-interaction";
-import { StarRating } from "@/components/star-rating";
 
 interface RecipePageProps {
   params: {
@@ -106,10 +106,6 @@ const RecipePage = async ({ params }: RecipePageProps): Promise<ReactElement> =>
                         {recipe.dietary_notes.map(note => <Badge key={note} variant="outline">{note}</Badge>)}
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <Star className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
-                    <p><strong>Rating:</strong> {recipe.average_rating.toFixed(1)} ({recipe.rating_count} reviews)</p>
                   </div>
                 </CardContent>
               </Card>
