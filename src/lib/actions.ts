@@ -49,6 +49,7 @@ export async function loginAction(data: { email: string; password: string;}) {
     const { email, password } = data;
     const pool = getPool();
     const client = await pool.connect();
+    const cookieStore = await cookies();
 
     // Special check for admin credentials from environment variables
     const adminEmail = process.env.ADMIN_EMAIL;
@@ -69,7 +70,7 @@ export async function loginAction(data: { email: string; password: string;}) {
             suspendedUntil: undefined,
         };
         
-        cookies().set("user", JSON.stringify(adminUserSessionData), {
+        cookieStore.set("user", JSON.stringify(adminUserSessionData), {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             maxAge: 60 * 60 * 24 * 7, // 1 week
@@ -114,7 +115,7 @@ export async function loginAction(data: { email: string; password: string;}) {
             suspendedUntil: user.suspended_until,
         };
         
-        cookies().set("user", JSON.stringify(userSessionData), {
+        cookieStore.set("user", JSON.stringify(userSessionData), {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             maxAge: 60 * 60 * 24 * 7, // 1 week
@@ -250,8 +251,9 @@ function parseIngredient(ingredientString: string): { quantity: string, name: st
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -394,8 +396,9 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 
 
 export async function deleteRecipeAction(recipeId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -421,8 +424,9 @@ export async function deleteRecipeAction(recipeId: string) {
 }
 
 export async function togglePublishAction(recipeId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -452,8 +456,9 @@ export async function togglePublishAction(recipeId: string) {
 }
 
 export async function deleteTipAction(recipeId: string, tipId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -509,8 +514,9 @@ export async function createGroupAction(data: { name: string; description: strin
 }
 
 export async function deleteGroupAction(groupId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -538,8 +544,9 @@ export async function deleteGroupAction(groupId: string) {
 }
 
 export async function editGroupAction(groupId: string, data: { name: string, description: string }) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -575,8 +582,9 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 // --- Community Content Actions ---
 
 export async function addPostAction(groupId: string, content: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -603,8 +611,9 @@ export async function addPostAction(groupId: string, content: string) {
 }
 
 export async function editPostAction(postId: string, content: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -634,8 +643,9 @@ export async function editPostAction(postId: string, content: string) {
 }
 
 export async function deletePostAction(postId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -668,8 +678,9 @@ export async function deletePostAction(postId: string) {
 }
 
 export async function addCommentAction(postId: string, content: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -701,8 +712,9 @@ export async function addCommentAction(postId: string, content: string) {
 }
 
 export async function editCommentAction(commentId: string, content: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -731,8 +743,9 @@ export async function editCommentAction(commentId: string, content: string) {
 }
 
 export async function deleteCommentAction(commentId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -764,8 +777,9 @@ export async function deleteCommentAction(commentId: string) {
 }
 
 export async function togglePostReactionAction(postId: string, reaction: 'like' | 'dislike') {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -807,8 +821,9 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
 }
 
 export async function reportContentAction(contentId: string, contentType: 'post' | 'comment', reason: string, details?: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -846,8 +861,9 @@ export async function reportContentAction(contentId: string, contentType: 'post'
 // --- User Actions ---
 
 export async function deleteUserAction(userId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -872,8 +888,9 @@ export async function deleteUserAction(userId: string) {
 }
 
 export async function suspendUserAction(userId: string, days: number) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -901,8 +918,9 @@ export async function suspendUserAction(userId: string, days: number) {
 }
 
 export async function unsuspendUserAction(userId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -928,8 +946,9 @@ export async function unsuspendUserAction(userId: string) {
 
 
 export async function joinGroupAction(groupId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
@@ -959,8 +978,9 @@ export async function joinGroupAction(groupId: string) {
 
 
 export async function leaveGroupAction(groupId: string) {
+    const cookieStore = await cookies();
     let user: User | null = null;
-    const userCookie = cookies().get("user");
+    const userCookie = cookieStore.get("user");
     if (userCookie) {
         try {
             user = JSON.parse(userCookie.value) as User;
