@@ -28,69 +28,44 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Helper function to set a cookie
-const setCookie = (name: string, value: string, days: number) => {
+// Helper function to set a cookie on the client for optimistic updates
+const setClientCookie = (name: string, value: string, days: number) => {
   let expires = "";
   if (days) {
     const date = new Date();
     date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
     expires = "; expires=" + date.toUTCString();
   }
-  // Note: We are not using httpOnly here because the client-side context needs to read it.
-  // In a real production app with the new `loginAction`, this cookie could be httpOnly.
   document.cookie = name + "=" + (value || "") + expires + "; path=/";
 }
 
-// Helper function to get a cookie
-const getCookie = (name: string): string | null => {
-  const nameEQ = name + "=";
-  const ca = document.cookie.split(';');
-  for(let i=0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) == ' ') c = c.substring(1,c.length);
-    if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
-  }
-  return null;
-}
-
-// Helper function to erase a cookie
 const eraseCookie = (name: string) => {
   document.cookie = name+'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
 }
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+export const AuthProvider = ({ children, initialUser }: { children: ReactNode; initialUser: User | null }) => {
+  const [user, setUser] = useState<User | null>(initialUser);
 
+  // This effect keeps the client-side state in sync with the server-provided prop.
+  // This is crucial for reflecting the login state after a `router.refresh()`.
   useEffect(() => {
-    // Initialize user from cookie only on the client-side
-    const userCookie = getCookie("user");
-    if (userCookie) {
-      try {
-        const parsedUser = JSON.parse(userCookie);
-        setUser(parsedUser);
-      } catch (e) {
-        // If cookie is invalid, erase it
-        eraseCookie("user");
-        setUser(null);
-      }
-    }
-  }, []);
+    setUser(initialUser);
+  }, [initialUser]);
 
   const { toast } = useToast();
 
-  const handleSetUser = (user: User | null) => {
-    if (user) {
-      setCookie("user", JSON.stringify(user), 7);
-    } else {
-      eraseCookie("user");
-    }
-    setUser(user);
-  };
-
   const logout = () => {
-    // Erase the cookie and refresh the page to clear server and client state
     eraseCookie("user");
     window.location.href = '/'; 
+  };
+  
+  const updateUserAndCookie = (updatedUser: User | null) => {
+      setUser(updatedUser);
+      if (updatedUser) {
+          setClientCookie("user", JSON.stringify(updatedUser), 7);
+      } else {
+          eraseCookie("user");
+      }
   };
 
   const toggleFavorite = (recipeId: string) => {
@@ -105,14 +80,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const isFavorite = user.favorites.includes(recipeId);
     
-    // In a real DB-backed app, this would be an optimistic update
-    // followed by a server action call.
-    handleSetUser({
+    const updatedUser = {
         ...user,
         favorites: isFavorite
             ? user.favorites.filter(id => id !== recipeId)
             : [...user.favorites, recipeId],
-    });
+    };
+    updateUserAndCookie(updatedUser);
 
     if (!isFavorite) {
         toast({ title: "Added to Favorites!" });
@@ -127,12 +101,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (data.name) {
         updatedUser.avatar = data.name;
       }
-      handleSetUser(updatedUser);
+      updateUserAndCookie(updatedUser);
   };
 
   const updateFavoriteCuisines = (cuisines: string[]) => {
     if (!user) return;
-    handleSetUser({ ...user, favoriteCuisines: cuisines });
+    updateUserAndCookie({ ...user, favoriteCuisines: cuisines });
   };
 
   return (
