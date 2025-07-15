@@ -1,4 +1,3 @@
-
 "use server";
 
 import { cookies } from "next/headers";
@@ -11,21 +10,23 @@ import { z } from 'zod';
 import type { Post, Comment, Report } from "./community";
 import { Resend } from 'resend';
 
-
 // --- Email Sending ---
-// This is where you integrate your third-party email service.
-// We are using Resend as an example.
 async function sendVerificationEmail(email: string, otp: string) {
     const apiKey = process.env.RESEND_API_KEY;
+    const fallbackEmail = process.env.RESEND_FALLBACK_EMAIL; // Your Resend-registered email (e.g., your.email@yourdomain.com)
 
     if (!apiKey) {
-      throw new Error("Resend API key is not configured. Please set RESEND_API_KEY environment variable.");
+        throw new Error("Resend API key is not configured. Please set RESEND_API_KEY environment variable.");
     }
-    
+    if (!fallbackEmail) {
+        console.error("RESEND_FALLBACK_EMAIL is not set for testing. Please configure it.");
+    }
+
     const resend = new Resend(apiKey);
 
     try {
-        await resend.emails.send({
+        console.log(`Attempting to send verification email to ${email} with OTP ${otp} at ${new Date().toISOString()}`);
+        const { data, error } = await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
             to: email,
             subject: 'Your RecipeRadar Verification Code',
@@ -35,28 +36,49 @@ async function sendVerificationEmail(email: string, otp: string) {
                     <p>Your verification code is:</p>
                     <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
                     <p>This code will expire in 10 minutes.</p>
+                    <p>If you didn’t request this, please ignore this email.</p>
                 </div>
             `,
         });
-        console.log(`Verification email sent to ${email}`);
+
+        if (error) {
+            console.error('Resend error:', { message: error.message, fullError: error });
+            // Fallback to your email for testing if external email fails
+            if (fallbackEmail && email !== fallbackEmail) {
+                console.log(`Falling back to ${fallbackEmail} for testing due to error`);
+                await resend.emails.send({
+                    from: 'RecipeRadar <onboarding@resend.dev>',
+                    to: fallbackEmail,
+                    subject: 'Test Verification Code (Fallback)',
+                    html: `
+                        <div style="font-family: sans-serif; text-align: center; padding: 20px;">
+                            <h2>RecipeRadar Fallback Test</h2>
+                            <p>Original email ${email} failed with error: ${error.message}. Your test code is:</p>
+                            <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
+                            <p>This is for testing; inform the user to retry with this code.</p>
+                        </div>
+                    `,
+                });
+                return { success: false, fallback: true, message: `Email to ${email} failed, sent to ${fallbackEmail} for testing.` };
+            }
+            throw new Error(`Could not send verification email: ${error.message}`);
+        }
+
+        console.log(`Verification email sent successfully to ${email}`, { emailId: data?.id });
+        return { success: true, emailId: data?.id };
     } catch (error) {
         console.error("Failed to send verification email:", error);
-        // Depending on your requirements, you might want to re-throw the error
-        // to let the calling function know that the email failed to send.
-        throw new Error("Could not send verification email.");
+        throw error;
     }
 }
 
-
 // --- Auth Actions ---
-
-export async function loginAction(data: { email: string; password: string;}) {
+export async function loginAction(data: { email: string; password: string; }) {
     const cookieStore = await cookies();
     const { email, password } = data;
     const pool = getPool();
     const client = await pool.connect();
 
-    // Special check for admin credentials from environment variables
     const adminEmail = process.env.ADMIN_EMAIL;
     const adminPassword = process.env.ADMIN_PASSWORD;
 
@@ -103,7 +125,7 @@ export async function loginAction(data: { email: string; password: string;}) {
         }
 
         if (user.suspended_until && new Date(user.suspended_until) > new Date()) {
-             return { success: false, error: `Your account is suspended until ${new Date(user.suspended_until).toLocaleDateString()}.` };
+            return { success: false, error: `Your account is suspended until ${new Date(user.suspended_until).toLocaleDateString()}.` };
         }
 
         const userSessionData: User = {
@@ -111,7 +133,7 @@ export async function loginAction(data: { email: string; password: string;}) {
             name: user.name,
             email: user.email,
             isAdmin: user.is_admin,
-            favorites: [], // Favorites will be fetched on the client or in a separate query
+            favorites: [],
             favoriteCuisines: [],
             readHistory: [],
             country: user.country,
@@ -128,7 +150,6 @@ export async function loginAction(data: { email: string; password: string;}) {
         });
 
         return { success: true, isAdmin: user.is_admin };
-
     } catch (error) {
         console.error(error);
         return { success: false, error: "An unexpected error occurred. Please try again." };
@@ -137,57 +158,55 @@ export async function loginAction(data: { email: string; password: string;}) {
     }
 }
 
+export async function signupAction(data: { name: string, email: string, password: string, country: string, dietaryPreference: string }) {
+    const { name, email, password, country, dietaryPreference } = data;
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const existingEmail = await client.query('SELECT id, is_verified FROM users WHERE email = $1', [email]);
+        if (existingEmail.rows.length > 0) {
+            if (!existingEmail.rows[0].is_verified) {
+                await client.query('DELETE FROM users WHERE id = $1', [existingEmail.rows[0].id]);
+            } else {
+                return { success: false, error: "A user with this email already exists." };
+            }
+        }
 
-export async function signupAction(data: {name: string, email: string, password: string, country: string, dietaryPreference: string}) {
-  const { name, email, password, country, dietaryPreference } = data;
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    // Check if email already exists
-    const existingEmail = await client.query('SELECT id, is_verified FROM users WHERE email = $1', [email]);
-    if (existingEmail.rows.length > 0) {
-       // If user exists and is not verified, we can allow re-trying signup, which will update their OTP
-       if (!existingEmail.rows[0].is_verified) {
-           await client.query('DELETE FROM users WHERE id = $1', [existingEmail.rows[0].id]);
-       } else {
-            return { success: false, error: "A user with this email already exists." };
-       }
+        const existingName = await client.query('SELECT id FROM users WHERE name ILIKE $1', [name]);
+        if (existingName.rows.length > 0) {
+            return { success: false, error: "This name is already taken. Please choose another." };
+        }
+        
+        const passwordHash = await bcrypt.hash(password, 10);
+        const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+        await client.query(
+            `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, is_admin, is_verified, verification_otp, verification_otp_expires)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [name, email, passwordHash, country, dietaryPreference, name, false, false, verificationOtp, otpExpires]
+        );
+
+        const emailResult = await sendVerificationEmail(email, verificationOtp);
+        if (!emailResult.success) {
+            console.log(emailResult.message || 'Email sending failed');
+            await client.query('COMMIT');
+            revalidatePath("/admin");
+            return { success: true, warning: "Account created, but email verification failed. Please contact support to verify your email." };
+        }
+
+        await client.query('COMMIT');
+        revalidatePath("/admin");
+        return { success: true };
+    } catch (error: any) {
+        await client.query('ROLLBACK');
+        console.error('Signup error:', error);
+        return { success: false, error: error.message || "Failed to create account. Please try again." };
+    } finally {
+        client.release();
     }
-
-    // Check if name already exists
-    const existingName = await client.query('SELECT id FROM users WHERE name ILIKE $1', [name]);
-    if (existingName.rows.length > 0) {
-      return { success: false, error: "This name is already taken. Please choose another." };
-    }
-    
-    const passwordHash = await bcrypt.hash(password, 10);
-    const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
-
-    await client.query(
-      `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, is_admin, is_verified, verification_otp, verification_otp_expires)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [name, email, passwordHash, country, dietaryPreference, name, false, false, verificationOtp, otpExpires]
-    );
-
-    await sendVerificationEmail(email, verificationOtp);
-    
-    await client.query('COMMIT');
-    revalidatePath("/admin");
-    return { success: true };
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    console.error(error);
-    // Provide a more specific error message if email sending fails
-    if (error.message === "Could not send verification email.") {
-        return { success: false, error: "Account created, but failed to send verification email. Please contact support." };
-    }
-    return { success: false, error: "Failed to create account. Please try again." };
-  } finally {
-    client.release();
-  }
 }
 
 export async function verifyOtpAction(email: string, otp: string) {
@@ -205,7 +224,6 @@ export async function verifyOtpAction(email: string, otp: string) {
 
         const user = result.rows[0];
         if (new Date(user.verification_otp_expires) < new Date()) {
-            // Optional: Add logic here to delete the user record or allow resending a new OTP
             return { success: false, error: 'Verification code has expired. Please sign up again to get a new one.' };
         }
         
@@ -223,36 +241,31 @@ export async function verifyOtpAction(email: string, otp: string) {
     }
 }
 
-
 // --- Recipe Actions ---
-
 const recipeFormSchema = z.object({
-  name: z.string().min(3, "Name must be at least 3 characters long"),
-  region: z.string().min(2, "Region is required"),
-  description: z.string().min(10, "Description must be at least 10 characters long"),
-  prep_time: z.string().min(1, "Prep time is required"),
-  cook_time: z.string().min(1, "Cook time is required"),
-  servings: z.string().min(1, "Servings are required"),
-  image_url: z.string().url("Must be a valid image URL"),
-  published: z.boolean().default(true),
-  dietary_type: z.enum(["Vegetarian", "Non-Vegetarian", "Vegan"]),
-  meal_category: z.string().min(1, "Meal category is required."),
-  consumption_time: z.array(z.string()).refine(value => value.some(item => item), {
-    message: "You have to select at least one consumption time.",
-  }),
-  dietary_notes: z.array(z.string()).optional(),
-  ingredients: z.array(z.object({ value: z.string().min(1, "Ingredient cannot be empty") })).min(1, "At least one ingredient is required"),
-  steps: z.array(z.object({ value: z.string().min(1, "Step cannot be empty") })).min(1, "At least one step is required"),
+    name: z.string().min(3, "Name must be at least 3 characters long"),
+    region: z.string().min(2, "Region is required"),
+    description: z.string().min(10, "Description must be at least 10 characters long"),
+    prep_time: z.string().min(1, "Prep time is required"),
+    cook_time: z.string().min(1, "Cook time is required"),
+    servings: z.string().min(1, "Servings are required"),
+    image_url: z.string().url("Must be a valid image URL"),
+    published: z.boolean().default(true),
+    dietary_type: z.enum(["Vegetarian", "Non-Vegetarian", "Vegan"]),
+    meal_category: z.string().min(1, "Meal category is required."),
+    consumption_time: z.array(z.string()).refine(value => value.some(item => item), {
+        message: "You have to select at least one consumption time.",
+    }),
+    dietary_notes: z.array(z.string()).optional(),
+    ingredients: z.array(z.object({ value: z.string().min(1, "Ingredient cannot be empty") })).min(1, "At least one ingredient is required"),
+    steps: z.array(z.object({ value: z.string().min(1, "Step cannot be empty") })).min(1, "At least one step is required"),
 });
 
 function parseIngredient(ingredientString: string): { quantity: string, name: string } {
     const parts = ingredientString.trim().split(' ');
-    if (parts.length === 1) {
-        return { quantity: '', name: parts[0] };
-    }
+    if (parts.length === 1) return { quantity: '', name: parts[0] };
     const quantity = parts.shift() as string;
-    const name = parts.join(' ');
-    return { quantity, name };
+    return { quantity, name: parts.join(' ') };
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
@@ -289,7 +302,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         let currentRecipeId = recipeId;
 
         if (currentRecipeId) {
-            // Update existing recipe
             await client.query(
                 `UPDATE recipes SET
                     name = $1, region = $2, description = $3, prep_time = $4, cook_time = $5,
@@ -298,11 +310,9 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
                 WHERE id = $13`,
                 [name, region, description, prep_time, cook_time, servings, image_url, published, dietary_type, meal_category, consumption_time, dietary_notes, currentRecipeId]
             );
-            // Clear old ingredients and steps
             await client.query('DELETE FROM ingredients WHERE recipe_id = $1', [currentRecipeId]);
             await client.query('DELETE FROM steps WHERE recipe_id = $1', [currentRecipeId]);
         } else {
-            // Create new recipe
             const recipeRes = await client.query(
                 `INSERT INTO recipes (name, region, description, prep_time, cook_time, servings, image_url, published, dietary_type, meal_category, consumption_time, dietary_notes)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
@@ -311,7 +321,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
             currentRecipeId = recipeRes.rows[0].id;
         }
 
-        // Insert ingredients
         for (let i = 0; i < ingredients.length; i++) {
             const { quantity, name: ingredientName } = parseIngredient(ingredients[i].value);
             await client.query(
@@ -320,7 +329,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
             );
         }
 
-        // Insert steps
         for (let i = 0; i < steps.length; i++) {
             await client.query(
                 'INSERT INTO steps (recipe_id, step_number, description) VALUES ($1, $2, $3)',
@@ -330,10 +338,9 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
 
         await client.query('COMMIT');
         revalidatePath("/admin");
-        if(currentRecipeId) revalidatePath(`/recipes/${currentRecipeId}`);
+        if (currentRecipeId) revalidatePath(`/recipes/${currentRecipeId}`);
         revalidatePath("/");
         return { success: true };
-
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Error in createOrUpdateRecipeAction:", error);
@@ -342,7 +349,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         client.release();
     }
 }
-
 
 export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: string; rating: number }, user: User): Promise<{ success: boolean; error?: string; newTip?: Tip}> {
     const pool = getPool();
@@ -357,13 +363,11 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
         );
 
         if (existingTipRes.rows.length > 0) {
-            // Update existing tip
             tipResult = await client.query(
                 'UPDATE tips SET tip = $1, rating = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
                 [tipData.tip, tipData.rating, existingTipRes.rows[0].id]
             );
         } else {
-            // Insert new tip
             tipResult = await client.query(
                 'INSERT INTO tips (recipe_id, user_id, tip, rating) VALUES ($1, $2, $3, $4) RETURNING *',
                 [recipeId, user.id, tipData.tip, tipData.rating]
@@ -373,22 +377,20 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
         await client.query('COMMIT');
 
         const newTipData = tipResult.rows[0];
-
-        // The trigger will update the recipe's average rating automatically.
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath(`/admin`);
 
         return { 
-          success: true, 
-          newTip: {
-            id: newTipData.id,
-            user_id: newTipData.user_id,
-            user_name: user.name, // We can add the user name since we have it
-            tip: newTipData.tip,
-            rating: newTipData.rating,
-            created_at: newTipData.created_at.toISOString(),
-            updated_at: (newTipData.updated_at || newTipData.created_at).toISOString(),
-          }
+            success: true, 
+            newTip: {
+                id: newTipData.id,
+                user_id: newTipData.user_id,
+                user_name: user.name,
+                tip: newTipData.tip,
+                rating: newTipData.rating,
+                created_at: newTipData.created_at.toISOString(),
+                updated_at: (newTipData.updated_at || newTipData.created_at).toISOString(),
+            }
         };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -398,7 +400,6 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
         client.release();
     }
 }
-
 
 export async function deleteRecipeAction(recipeId: string) {
     const cookieStore = await cookies();
@@ -445,8 +446,8 @@ export async function togglePublishAction(recipeId: string) {
     const client = await pool.connect();
     try {
         await client.query(
-        'UPDATE recipes SET published = NOT published WHERE id = $1',
-        [recipeId]
+            'UPDATE recipes SET published = NOT published WHERE id = $1',
+            [recipeId]
         );
         revalidatePath("/admin");
         revalidatePath("/");
@@ -488,9 +489,7 @@ export async function deleteTipAction(recipeId: string, tipId: string) {
     }
 }
 
-
 // --- Group Actions ---
-
 export async function createGroupAction(data: { name: string; description: string }, user: User) {
     if (!user) return { success: false, error: "You must be logged in." };
     const pool = getPool();
@@ -564,15 +563,14 @@ export async function editGroupAction(groupId: string, data: { name: string, des
     const pool = getPool();
     const client = await pool.connect();
     try {
-        // Check if the user is the creator of the group
         const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
         if (groupRes.rows.length === 0 || groupRes.rows[0].creator_id !== user.id) {
-        return { success: false, error: "You do not have permission to edit this group." };
+            return { success: false, error: "You do not have permission to edit this group." };
         }
         
         await client.query(
-        'UPDATE groups SET name = $1, description = $2 WHERE id = $3',
-        [data.name, data.description, groupId]
+            'UPDATE groups SET name = $1, description = $2 WHERE id = $3',
+            [data.name, data.description, groupId]
         );
         revalidatePath(`/community`);
         return { success: true };
@@ -585,7 +583,6 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 }
 
 // --- Community Content Actions ---
-
 export async function addPostAction(groupId: string, content: string) {
     const cookieStore = await cookies();
     let user: User | null = null;
@@ -766,7 +763,7 @@ export async function deleteCommentAction(commentId: string) {
         const isAuthor = commentRes.rows[0]?.author_id === user.id;
 
         if (!user.isAdmin && !isAuthor) {
-             return { success: false, error: "You don't have permission to delete this comment." };
+            return { success: false, error: "You don't have permission to delete this comment." };
         }
         
         await client.query('DELETE FROM comments WHERE id = $1', [commentId]);
@@ -803,14 +800,11 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
         const existingReaction = await client.query('SELECT reaction FROM post_reactions WHERE user_id = $1 AND post_id = $2', [user.id, postId]);
         if (existingReaction.rows.length > 0) {
             if (existingReaction.rows[0].reaction === reaction) {
-                // User is clicking the same reaction again, so remove it
                 await client.query('DELETE FROM post_reactions WHERE user_id = $1 AND post_id = $2', [user.id, postId]);
             } else {
-                // User is changing their reaction
                 await client.query('UPDATE post_reactions SET reaction = $1 WHERE user_id = $2 AND post_id = $3', [reaction, user.id, postId]);
             }
         } else {
-            // No existing reaction, so insert a new one
             await client.query('INSERT INTO post_reactions (user_id, post_id, reaction) VALUES ($1, $2, $3)', [user.id, postId, reaction]);
         }
         await client.query('COMMIT');
@@ -862,9 +856,7 @@ export async function reportContentAction(contentId: string, contentType: 'post'
     }
 }
 
-
 // --- User Actions ---
-
 export async function deleteUserAction(userId: string) {
     const cookieStore = await cookies();
     let user: User | null = null;
@@ -949,7 +941,6 @@ export async function unsuspendUserAction(userId: string) {
     }
 }
 
-
 export async function joinGroupAction(groupId: string) {
     const cookieStore = await cookies();
     let user: User | null = null;
@@ -980,7 +971,6 @@ export async function joinGroupAction(groupId: string) {
         client.release();
     }
 }
-
 
 export async function leaveGroupAction(groupId: string) {
     const cookieStore = await cookies();
