@@ -1,0 +1,20 @@
+# See https://www.robotstxt.org/robotstxt.html for documentation on how to use the robots.txt file
+
+# Allow all crawlers access to the main content
+User-agent: *
+Allow: /
+
+# Disallow crawlers from accessing user-specific and admin pages
+# This is important for privacy and to prevent indexing of user-generated content,
+# which can be a factor in monetization programs like Google AdSense.
+Disallow: /admin
+Disallow: /profile
+Disallow: /community
+Disallow: /login
+Disallow: /signup
+Disallow: /verify-otp
+Disallow: /check-email
+Disallow: /verify-email
+
+# Allow crawling of the sitemap
+Sitemap: /sitemap.xml
