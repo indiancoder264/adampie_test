@@ -1,33 +1,23 @@
-import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchRecipeById, fetchTipsForRecipe } from '@/lib/data';
+import { fetchRecipeById, fetchTipsForRecipe } from "@/lib/data";
 import { Clock, Users, ArrowLeft, Utensils, Salad, Calendar } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { RecipeInteraction } from "@/components/recipe-interaction";
 
-interface Props {
-  params: {
-    id: string;
-  };
-}
+export default async function Page({
+  params: { id },
+}: {
+  params: { id: string };
+}) {
+  const recipe = await fetchRecipeById(id);
+  if (!recipe) notFound();
 
-const RecipePage = async ({ params }: Props) => {
-  const recipe = await fetchRecipeById(params.id);
-
-  if (!recipe) {
-    notFound();
-  }
-
-  const initialTips = await fetchTipsForRecipe(params.id);
+  const initialTips = await fetchTipsForRecipe(id);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -40,6 +30,7 @@ const RecipePage = async ({ params }: Props) => {
 
       <div className="lg:grid lg:grid-cols-1 lg:gap-8">
         <article>
+          {/* Header */}
           <div className="mb-8 text-center">
             <Badge variant="secondary" className="mb-4 text-lg">
               {recipe.region}
@@ -55,6 +46,7 @@ const RecipePage = async ({ params }: Props) => {
             </p>
           </div>
 
+          {/* Image */}
           <div className="flex justify-center mb-8">
             <Card className="overflow-hidden w-full max-w-4xl h-[330px]">
               <Image
@@ -68,8 +60,10 @@ const RecipePage = async ({ params }: Props) => {
             </Card>
           </div>
 
+          {/* Details & Ingredients */}
           <div className="space-y-8 max-w-4xl mx-auto">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Details */}
               <Card>
                 <CardHeader>
                   <h3 className="font-headline text-2xl md:text-3xl">Details</h3>
@@ -77,23 +71,34 @@ const RecipePage = async ({ params }: Props) => {
                 <CardContent className="space-y-4 text-base">
                   <div className="flex items-start gap-4">
                     <Clock className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
-                    <p><strong>Prep:</strong> {recipe.prep_time} | <strong>Cook:</strong> {recipe.cook_time}</p>
+                    <p>
+                      <strong>Prep:</strong> {recipe.prep_time} |{" "}
+                      <strong>Cook:</strong> {recipe.cook_time}
+                    </p>
                   </div>
                   <div className="flex items-start gap-4">
                     <Users className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
-                    <p><strong>Servings:</strong> {recipe.servings}</p>
+                    <p>
+                      <strong>Servings:</strong> {recipe.servings}
+                    </p>
                   </div>
                   <div className="flex items-start gap-4">
                     <Utensils className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
-                    <p><strong>Category:</strong> {recipe.meal_category}</p>
+                    <p>
+                      <strong>Category:</strong> {recipe.meal_category}
+                    </p>
                   </div>
                   <div className="flex items-start gap-4">
                     <Calendar className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
                     <div>
-                      <p><strong>Recommended for:</strong></p>
+                      <p>
+                        <strong>Recommended for:</strong>
+                      </p>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        {recipe.consumption_time.map(time => (
-                          <Badge key={time} variant="outline">{time}</Badge>
+                        {recipe.consumption_time.map((time) => (
+                          <Badge key={time} variant="outline">
+                            {time}
+                          </Badge>
                         ))}
                       </div>
                     </div>
@@ -101,11 +106,17 @@ const RecipePage = async ({ params }: Props) => {
                   <div className="flex items-start gap-4">
                     <Salad className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
                     <div>
-                      <p><strong>Dietary Info:</strong></p>
+                      <p>
+                        <strong>Dietary Info:</strong>
+                      </p>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        <Badge variant="secondary">{recipe.dietary_type}</Badge>
-                        {recipe.dietary_notes.map(note => (
-                          <Badge key={note} variant="outline">{note}</Badge>
+                        <Badge variant="secondary">
+                          {recipe.dietary_type}
+                        </Badge>
+                        {recipe.dietary_notes.map((note) => (
+                          <Badge key={note} variant="outline">
+                            {note}
+                          </Badge>
                         ))}
                       </div>
                     </div>
@@ -113,30 +124,33 @@ const RecipePage = async ({ params }: Props) => {
                 </CardContent>
               </Card>
 
+              {/* Ingredients */}
               <Card>
                 <CardHeader>
-                  <h3 className="font-headline text-2xl md:text-3xl">Ingredients</h3>
+                  <h3 className="font-headline text-2xl md:text-3xl">
+                    Ingredients
+                  </h3>
                 </CardHeader>
                 <CardContent>
                   <ul className="list-disc list-outside space-y-2 text-lg pl-5">
                     {recipe.ingredients.map((ing) => (
-                      <li key={ing.id}>{ing.quantity} {ing.name}</li>
+                      <li key={ing.id}>
+                        {ing.quantity} {ing.name}
+                      </li>
                     ))}
                   </ul>
                 </CardContent>
               </Card>
             </div>
-            
-            <RecipeInteraction 
-              recipeId={recipe.id} 
-              steps={recipe.steps} 
-              initialTips={initialTips} 
+
+            <RecipeInteraction
+              recipeId={recipe.id}
+              steps={recipe.steps}
+              initialTips={initialTips}
             />
           </div>
         </article>
       </div>
     </div>
   );
-};
-
-export default RecipePage;
+}
