@@ -9,11 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { RecipeInteraction } from "@/components/recipe-interaction";
 
-export default async function Page({
-  params: { id },
-}: {
-  params: { id: string };
-}) {
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params; // Await the params Promise to get the id
   const recipe = await fetchRecipeById(id);
   if (!recipe) notFound();
 
