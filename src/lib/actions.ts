@@ -1,3 +1,4 @@
+
 "use server";
 
 import { cookies } from "next/headers";
@@ -7,7 +8,6 @@ import type { User } from "./auth";
 import type { Recipe, Tip } from "./recipes";
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { randomUUID } from 'crypto';
 import type { Post, Comment, Report } from "./community";
 import { Resend } from 'resend';
 
@@ -16,11 +16,17 @@ import { Resend } from 'resend';
 // This is where you integrate your third-party email service.
 // We are using Resend as an example.
 async function sendVerificationEmail(email: string, otp: string) {
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    const apiKey = process.env.RESEND_API_KEY;
+
+    if (!apiKey) {
+      throw new Error("Resend API key is not configured. Please set RESEND_API_KEY environment variable.");
+    }
+    
+    const resend = new Resend(apiKey);
 
     try {
         await resend.emails.send({
-            from: 'RecipeRadar <onboarding@resend.dev>', // Replace with your "from" address
+            from: 'RecipeRadar <onboarding@resend.dev>',
             to: email,
             subject: 'Your RecipeRadar Verification Code',
             html: `
@@ -45,10 +51,10 @@ async function sendVerificationEmail(email: string, otp: string) {
 // --- Auth Actions ---
 
 export async function loginAction(data: { email: string; password: string;}) {
+    const cookieStore = await cookies();
     const { email, password } = data;
     const pool = getPool();
     const client = await pool.connect();
-    const cookieStore = await cookies();
 
     // Special check for admin credentials from environment variables
     const adminEmail = process.env.ADMIN_EMAIL;
