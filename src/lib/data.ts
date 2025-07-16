@@ -1,5 +1,4 @@
 
-
 import getPool from './db';
 import type { Recipe } from './recipes';
 import type { User } from './auth';
@@ -19,8 +18,8 @@ function isGroup(group: any): group is Group {
 }
 
 export async function fetchUsers(): Promise<User[]> {
-    const pool = getPool();
     try {
+        const pool = getPool();
         const result = await pool.query(`
             SELECT 
                 u.id, 
@@ -60,8 +59,8 @@ export async function fetchUsers(): Promise<User[]> {
 }
 
 export async function fetchRecipes(): Promise<Recipe[]> {
-    const pool = getPool();
     try {
+        const pool = getPool();
         const result = await pool.query(`
             SELECT
                 r.id,
@@ -108,6 +107,9 @@ export async function fetchRecipes(): Promise<Recipe[]> {
         `);
         return result.rows.map(row => ({
             ...row,
+            average_rating: parseFloat(row.average_rating),
+            rating_count: parseInt(row.rating_count, 10),
+            favorite_count: parseInt(row.favorite_count, 10),
             ingredients: row.ingredients || [],
             steps: row.steps || [],
             tips: row.tips || [],
@@ -120,8 +122,8 @@ export async function fetchRecipes(): Promise<Recipe[]> {
 
 
 export async function fetchGroups(): Promise<Group[]> {
-    const pool = getPool();
     try {
+        const pool = getPool();
         const result = await pool.query(`
             SELECT
                 g.id,
@@ -195,8 +197,8 @@ export async function fetchGroups(): Promise<Group[]> {
 }
 
 export async function fetchRecipeById(id: string): Promise<Recipe | null> {
-    const pool = getPool();
     try {
+        const pool = getPool();
         const result = await pool.query(`
             SELECT
                 r.id,
@@ -243,6 +245,9 @@ export async function fetchRecipeById(id: string): Promise<Recipe | null> {
         const recipe = result.rows[0];
         return {
             ...recipe,
+            average_rating: parseFloat(recipe.average_rating),
+            rating_count: parseInt(recipe.rating_count, 10),
+            favorite_count: parseInt(recipe.favorite_count, 10),
             ingredients: recipe.ingredients || [],
             steps: recipe.steps || [],
             tips: [], // Tips are fetched separately for dynamic loading
@@ -254,8 +259,8 @@ export async function fetchRecipeById(id: string): Promise<Recipe | null> {
 }
 
 export async function fetchTipsForRecipe(recipeId: string): Promise<Recipe['tips']> {
-    const pool = getPool();
     try {
+        const pool = getPool();
         const result = await pool.query(`
             SELECT t.id, t.user_id, u.name as user_name, t.tip, t.rating, t.created_at, t.updated_at
             FROM tips t
