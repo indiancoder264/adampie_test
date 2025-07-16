@@ -1,15 +1,16 @@
-
 "use client";
 
 import Link from "next/link";
-import React from "react";
+import React, { useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ChefHat, Menu, User } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { logoutAction } from "@/lib/actions";
 
 export function Header() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const [isPending, startTransition] = useTransition();
   const [isSheetOpen, setIsSheetOpen] = React.useState(false);
 
   const navLinks = [
@@ -19,8 +20,10 @@ export function Header() {
   ];
 
   const handleLogout = () => {
-    logout();
-    setIsSheetOpen(false);
+    startTransition(async () => {
+      await logoutAction();
+      setIsSheetOpen(false);
+    });
   };
 
   return (
@@ -52,7 +55,9 @@ export function Header() {
                   {user.name}
                 </Link>
               </Button>
-              <Button onClick={logout}>Logout</Button>
+              <Button onClick={handleLogout} disabled={isPending}>
+                {isPending ? "Logging out..." : "Logout"}
+              </Button>
             </>
           ) : (
             <>
@@ -107,8 +112,8 @@ export function Header() {
                       <User className="h-5 w-5" />
                       {user.name}
                     </Link>
-                    <Button onClick={handleLogout} className="w-full">
-                      Logout
+                    <Button onClick={handleLogout} disabled={isPending} className="w-full">
+                      {isPending ? "Logging out..." : "Logout"}
                     </Button>
                   </>
                 ) : (

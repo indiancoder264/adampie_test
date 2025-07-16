@@ -1,4 +1,3 @@
-
 "use client";
 
 import React from "react";
@@ -93,10 +92,6 @@ export default function ProfilePage() {
   const handleProfileUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     updateUser({ name, email, country, dietaryPreference });
-    toast({
-      title: "Profile Updated",
-      description: "Your details have been saved.",
-    });
   };
 
   const handlePasswordUpdate = (e: React.FormEvent) => {
@@ -111,10 +106,6 @@ export default function ProfilePage() {
 
   const handleSaveCuisines = () => {
     updateFavoriteCuisines(selectedCuisines);
-    toast({
-      title: "Cuisines Updated",
-      description: "Your favorite cuisines have been saved.",
-    });
   };
 
   const favoriteRecipes = recipes.filter(recipe => user.favorites.includes(recipe.id));
@@ -133,7 +124,7 @@ export default function ProfilePage() {
     <div className="container mx-auto max-w-5xl px-4 py-8">
       <div className="flex flex-col md:flex-row items-center gap-6 mb-8">
         <Avatar className="h-24 w-24 border">
-          <AvatarImage src={getAvatarUrl(user.name)} />
+          <AvatarImage src={getAvatarUrl(user.avatar)} />
           <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
         </Avatar>
         <div>
@@ -348,4 +339,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-

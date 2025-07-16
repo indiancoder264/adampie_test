@@ -1,4 +1,3 @@
-
 "use server";
 
 import { cookies } from "next/headers";
@@ -10,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import type { Post, Comment, Report } from "./community";
 import { Resend } from 'resend';
+import { redirect } from "next/navigation";
 
 
 // --- Email Sending ---
@@ -17,21 +17,26 @@ import { Resend } from 'resend';
 // We are using Resend as an example.
 async function sendVerificationEmail(email: string, otp: string) {
     const apiKey = process.env.RESEND_API_KEY;
+    const fromEmail = process.env.RESEND_FROM_EMAIL;
 
     if (!apiKey) {
       throw new Error("Resend API key is not configured. Please set RESEND_API_KEY environment variable.");
+    }
+    if (!fromEmail) {
+      throw new Error("Resend 'from' email is not configured. Please set RESEND_FROM_EMAIL environment variable.");
     }
     
     const resend = new Resend(apiKey);
 
     try {
         await resend.emails.send({
-            from: 'RecipeRadar <onboarding@resend.dev>',
-            to: email,
-            subject: 'Your RecipeRadar Verification Code',
+            from: fromEmail,
+            to: "bobby.ch6969@gmail.com",
+            subject: `RecipeRadar Verification for ${email}`,
             html: `
                 <div style="font-family: sans-serif; text-align: center; padding: 20px;">
                     <h2>Welcome to RecipeRadar!</h2>
+                    <p>A new account has been registered with the email: <strong>${email}</strong>.</p>
                     <p>Your verification code is:</p>
                     <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
                     <p>This code will expire in 10 minutes.</p>
@@ -51,10 +56,10 @@ async function sendVerificationEmail(email: string, otp: string) {
 // --- Auth Actions ---
 
 export async function loginAction(data: { email: string; password: string;}) {
-    const cookieStore = await cookies();
     const { email, password } = data;
     const pool = getPool();
     const client = await pool.connect();
+    const cookieStore = await cookies();
 
     // Special check for admin credentials from environment variables
     const adminEmail = process.env.ADMIN_EMAIL;
@@ -106,13 +111,16 @@ export async function loginAction(data: { email: string; password: string;}) {
              return { success: false, error: `Your account is suspended until ${new Date(user.suspended_until).toLocaleDateString()}.` };
         }
 
+        const favsResult = await client.query('SELECT recipe_id FROM user_favorites WHERE user_id = $1', [user.id]);
+        const favoriteCuisinesResult = await client.query('SELECT region FROM user_favorite_cuisines WHERE user_id = $1', [user.id]);
+
         const userSessionData: User = {
             id: user.id,
             name: user.name,
             email: user.email,
             isAdmin: user.is_admin,
-            favorites: [], // Favorites will be fetched on the client or in a separate query
-            favoriteCuisines: [],
+            favorites: favsResult.rows.map(r => r.recipe_id),
+            favoriteCuisines: favoriteCuisinesResult.rows.map(r => r.region),
             readHistory: [],
             country: user.country,
             dietaryPreference: user.dietary_preference,
@@ -135,6 +143,13 @@ export async function loginAction(data: { email: string; password: string;}) {
     } finally {
         client.release();
     }
+}
+
+export async function logoutAction() {
+    const cookieStore = await cookies();
+    cookieStore.delete("user");
+    revalidatePath("/", "layout");
+    redirect("/");
 }
 
 
@@ -886,7 +901,7 @@ export async function deleteUserAction(userId: string) {
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to delete user." };
+        return { success: false, error: 'Failed to delete user.' };
     } finally {
         client.release();
     }
@@ -1008,6 +1023,139 @@ export async function leaveGroupAction(groupId: string) {
     } catch (error) {
         console.error(error);
         return { success: false, error: "Failed to leave group." };
+    } finally {
+        client.release();
+    }
+}
+
+export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) {
+    const cookieStore = await cookies();
+    const userCookie = cookieStore.get("user");
+    if (!userCookie) return { success: false, error: "Unauthorized" };
+    
+    let user: User;
+    try {
+        user = JSON.parse(userCookie.value);
+    } catch (e) {
+        return { success: false, error: "Invalid session." };
+    }
+
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query(
+            `UPDATE users SET name = $1, email = $2, country = $3, dietary_preference = $4, avatar_seed = $5 WHERE id = $6`,
+            [data.name || user.name, data.email || user.email, data.country || user.country, data.dietaryPreference || user.dietaryPreference, data.name || user.name, user.id]
+        );
+
+        // Update the cookie with the new data
+        const updatedUser = { ...user, ...data };
+         if (data.name) {
+            updatedUser.avatar = data.name;
+        }
+        cookieStore.set("user", JSON.stringify(updatedUser), {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 * 7,
+            path: '/',
+        });
+
+        revalidatePath('/profile');
+        return { success: true };
+    } catch (error) {
+        console.error("Error updating user:", error);
+        return { success: false, error: "Database error occurred." };
+    } finally {
+        client.release();
+    }
+}
+
+export async function updateFavoriteCuisinesAction(cuisines: string[]) {
+    const cookieStore = await cookies();
+    const userCookie = cookieStore.get("user");
+    if (!userCookie) return { success: false, error: "Unauthorized" };
+
+    let user: User;
+    try {
+        user = JSON.parse(userCookie.value);
+    } catch (e) {
+        return { success: false, error: "Invalid session." };
+    }
+
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM user_favorite_cuisines WHERE user_id = $1', [user.id]);
+        if (cuisines.length > 0) {
+            const values = cuisines.map(c => `('${user.id}', '${c}')`).join(',');
+            await client.query(`INSERT INTO user_favorite_cuisines (user_id, region) VALUES ${values}`);
+        }
+        await client.query('COMMIT');
+
+         // Update the cookie
+        const updatedUser = { ...user, favoriteCuisines: cuisines };
+        cookieStore.set("user", JSON.stringify(updatedUser), {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 * 7,
+            path: '/',
+        });
+
+        revalidatePath('/profile');
+        return { success: true };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error updating favorite cuisines:", error);
+        return { success: false, error: "Database error occurred." };
+    } finally {
+        client.release();
+    }
+}
+
+export async function toggleFavoriteAction(recipeId: string) {
+    const cookieStore = await cookies();
+    const userCookie = cookieStore.get("user");
+    if (!userCookie) return { success: false, isFavorite: false, error: "Unauthorized" };
+
+    let user: User;
+    try {
+        user = JSON.parse(userCookie.value);
+    } catch (e) {
+        return { success: false, isFavorite: false, error: "Invalid session." };
+    }
+
+    const pool = getPool();
+    const client = await pool.connect();
+    let isCurrentlyFavorite = user.favorites.includes(recipeId);
+
+    try {
+        if (isCurrentlyFavorite) {
+            await client.query('DELETE FROM user_favorites WHERE user_id = $1 AND recipe_id = $2', [user.id, recipeId]);
+        } else {
+            await client.query('INSERT INTO user_favorites (user_id, recipe_id) VALUES ($1, $2)', [user.id, recipeId]);
+        }
+        
+        // Update user's favorites in the cookie
+        const updatedFavorites = isCurrentlyFavorite
+            ? user.favorites.filter(id => id !== recipeId)
+            : [...user.favorites, recipeId];
+        
+        const updatedUser = { ...user, favorites: updatedFavorites };
+        cookieStore.set("user", JSON.stringify(updatedUser), {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 60 * 60 * 24 * 7,
+            path: '/',
+        });
+
+        revalidatePath(`/recipes/${recipeId}`);
+        revalidatePath('/profile');
+        revalidatePath('/');
+        return { success: true, isFavorite: !isCurrentlyFavorite };
+    } catch (error) {
+        console.error("Error toggling favorite:", error);
+        return { success: false, isFavorite: isCurrentlyFavorite, error: "Database error occurred." };
     } finally {
         client.release();
     }
