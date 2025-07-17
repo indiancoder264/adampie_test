@@ -13,25 +13,22 @@ import { redirect } from "next/navigation";
 
 
 // --- Email Sending ---
-// This is where you integrate your third-party email service.
-// We are using Resend as an example.
 async function sendVerificationEmail(email: string, otp: string) {
     const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.RESEND_FROM_EMAIL;
-
     if (!apiKey) {
-      throw new Error("Resend API key is not configured. Please set RESEND_API_KEY environment variable.");
-    }
-    if (!fromEmail) {
-      throw new Error("Resend 'from' email is not configured. Please set RESEND_FROM_EMAIL environment variable.");
+      console.error("Resend API key is not configured.");
+      throw new Error("Server configuration error: Email service is not set up.");
     }
     
     const resend = new Resend(apiKey);
 
     try {
         await resend.emails.send({
-            from: fromEmail,
-            to: "bobby.ch6969@gmail.com",
+            from: 'RecipeRadar <onboarding@resend.dev>',
+            // In sandbox mode, Resend only allows sending to the verified email address.
+            // For this project, we will send all verification emails to a fixed address
+            // specified in the environment variables to allow for testing the flow.
+            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
             subject: `RecipeRadar Verification for ${email}`,
             html: `
                 <div style="font-family: sans-serif; text-align: center; padding: 20px;">
@@ -43,11 +40,9 @@ async function sendVerificationEmail(email: string, otp: string) {
                 </div>
             `,
         });
-        console.log(`Verification email sent to ${email}`);
+        console.log(`Verification email sent for ${email}`);
     } catch (error) {
         console.error("Failed to send verification email:", error);
-        // Depending on your requirements, you might want to re-throw the error
-        // to let the calling function know that the email failed to send.
         throw new Error("Could not send verification email.");
     }
 }
@@ -61,35 +56,6 @@ export async function loginAction(data: { email: string; password: string;}) {
     const client = await pool.connect();
     const cookieStore = await cookies();
 
-    // Special check for admin credentials from environment variables
-    const adminEmail = process.env.ADMIN_EMAIL;
-    const adminPassword = process.env.ADMIN_PASSWORD;
-
-    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
-        const adminUserSessionData: User = {
-            id: 'admin-user',
-            name: 'Admin',
-            email: adminEmail,
-            isAdmin: true,
-            favorites: [],
-            favoriteCuisines: [],
-            readHistory: [],
-            country: 'N/A',
-            dietaryPreference: 'All',
-            avatar: 'Admin',
-            suspendedUntil: undefined,
-        };
-        
-        cookieStore.set("user", JSON.stringify(adminUserSessionData), {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            maxAge: 60 * 60 * 24 * 7, // 1 week
-            path: '/',
-        });
-
-        return { success: true, isAdmin: true };
-    }
-    
     try {
         const result = await client.query('SELECT * FROM users WHERE email = $1', [email]);
         if (result.rows.length === 0) {
@@ -149,7 +115,6 @@ export async function logoutAction() {
     const cookieStore = await cookies();
     cookieStore.delete("user");
     revalidatePath("/", "layout");
-    redirect("/");
 }
 
 
@@ -163,7 +128,6 @@ export async function signupAction(data: {name: string, email: string, password:
     // Check if email already exists
     const existingEmail = await client.query('SELECT id, is_verified FROM users WHERE email = $1', [email]);
     if (existingEmail.rows.length > 0) {
-       // If user exists and is not verified, we can allow re-trying signup, which will update their OTP
        if (!existingEmail.rows[0].is_verified) {
            await client.query('DELETE FROM users WHERE id = $1', [existingEmail.rows[0].id]);
        } else {
@@ -171,7 +135,6 @@ export async function signupAction(data: {name: string, email: string, password:
        }
     }
 
-    // Check if name already exists
     const existingName = await client.query('SELECT id FROM users WHERE name ILIKE $1', [name]);
     if (existingName.rows.length > 0) {
       return { success: false, error: "This name is already taken. Please choose another." };
@@ -195,7 +158,6 @@ export async function signupAction(data: {name: string, email: string, password:
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error(error);
-    // Provide a more specific error message if email sending fails
     if (error.message === "Could not send verification email.") {
         return { success: false, error: "Account created, but failed to send verification email. Please contact support." };
     }
@@ -220,7 +182,6 @@ export async function verifyOtpAction(email: string, otp: string) {
 
         const user = result.rows[0];
         if (new Date(user.verification_otp_expires) < new Date()) {
-            // Optional: Add logic here to delete the user record or allow resending a new OTP
             return { success: false, error: 'Verification code has expired. Please sign up again to get a new one.' };
         }
         
@@ -262,8 +223,8 @@ const recipeFormSchema = z.object({
 
 function parseIngredient(ingredientString: string): { quantity: string, name: string } {
     const parts = ingredientString.trim().split(' ');
-    if (parts.length === 1) {
-        return { quantity: '', name: parts[0] };
+    if (parts.length <= 1) {
+        return { quantity: '', name: ingredientString.trim() };
     }
     const quantity = parts.shift() as string;
     const name = parts.join(' ');
@@ -304,7 +265,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         let currentRecipeId = recipeId;
 
         if (currentRecipeId) {
-            // Update existing recipe
             await client.query(
                 `UPDATE recipes SET
                     name = $1, region = $2, description = $3, prep_time = $4, cook_time = $5,
@@ -313,11 +273,9 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
                 WHERE id = $13`,
                 [name, region, description, prep_time, cook_time, servings, image_url, published, dietary_type, meal_category, consumption_time, dietary_notes, currentRecipeId]
             );
-            // Clear old ingredients and steps
             await client.query('DELETE FROM ingredients WHERE recipe_id = $1', [currentRecipeId]);
             await client.query('DELETE FROM steps WHERE recipe_id = $1', [currentRecipeId]);
         } else {
-            // Create new recipe
             const recipeRes = await client.query(
                 `INSERT INTO recipes (name, region, description, prep_time, cook_time, servings, image_url, published, dietary_type, meal_category, consumption_time, dietary_notes)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
@@ -326,7 +284,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
             currentRecipeId = recipeRes.rows[0].id;
         }
 
-        // Insert ingredients
         for (let i = 0; i < ingredients.length; i++) {
             const { quantity, name: ingredientName } = parseIngredient(ingredients[i].value);
             await client.query(
@@ -335,7 +292,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
             );
         }
 
-        // Insert steps
         for (let i = 0; i < steps.length; i++) {
             await client.query(
                 'INSERT INTO steps (recipe_id, step_number, description) VALUES ($1, $2, $3)',
@@ -344,9 +300,9 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         }
 
         await client.query('COMMIT');
-        revalidatePath("/admin");
+        revalidatePath("/admin", "layout");
         if(currentRecipeId) revalidatePath(`/recipes/${currentRecipeId}`);
-        revalidatePath("/");
+        revalidatePath("/", "layout");
         return { success: true };
 
     } catch (error) {
@@ -372,13 +328,11 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
         );
 
         if (existingTipRes.rows.length > 0) {
-            // Update existing tip
             tipResult = await client.query(
                 'UPDATE tips SET tip = $1, rating = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
                 [tipData.tip, tipData.rating, existingTipRes.rows[0].id]
             );
         } else {
-            // Insert new tip
             tipResult = await client.query(
                 'INSERT INTO tips (recipe_id, user_id, tip, rating) VALUES ($1, $2, $3, $4) RETURNING *',
                 [recipeId, user.id, tipData.tip, tipData.rating]
@@ -389,7 +343,6 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 
         const newTipData = tipResult.rows[0];
 
-        // The trigger will update the recipe's average rating automatically.
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath(`/admin`);
 
@@ -398,7 +351,7 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
           newTip: {
             id: newTipData.id,
             user_id: newTipData.user_id,
-            user_name: user.name, // We can add the user name since we have it
+            user_name: user.name,
             tip: newTipData.tip,
             rating: newTipData.rating,
             created_at: newTipData.created_at.toISOString(),
@@ -432,8 +385,8 @@ export async function deleteRecipeAction(recipeId: string) {
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM recipes WHERE id = $1', [recipeId]);
-        revalidatePath("/admin");
-        revalidatePath("/");
+        revalidatePath("/admin", "layout");
+        revalidatePath("/", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -463,8 +416,8 @@ export async function togglePublishAction(recipeId: string) {
         'UPDATE recipes SET published = NOT published WHERE id = $1',
         [recipeId]
         );
-        revalidatePath("/admin");
-        revalidatePath("/");
+        revalidatePath("/admin", "layout");
+        revalidatePath("/", "layout");
         revalidatePath(`/recipes/${recipeId}`);
         return { success: true };
     } catch (error) {
@@ -522,7 +475,7 @@ export async function createGroupAction(data: { name: string; description: strin
             [user.id, groupId]
         );
         await client.query('COMMIT');
-        revalidatePath('/community');
+        revalidatePath('/community', 'layout');
         return { success: true, groupId };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -552,8 +505,7 @@ export async function deleteGroupAction(groupId: string) {
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
-        revalidatePath("/admin/community-management");
-        revalidatePath("/community");
+        revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -579,7 +531,6 @@ export async function editGroupAction(groupId: string, data: { name: string, des
     const pool = getPool();
     const client = await pool.connect();
     try {
-        // Check if the user is the creator of the group
         const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
         if (groupRes.rows.length === 0 || groupRes.rows[0].creator_id !== user.id) {
         return { success: false, error: "You do not have permission to edit this group." };
@@ -589,7 +540,7 @@ export async function editGroupAction(groupId: string, data: { name: string, des
         'UPDATE groups SET name = $1, description = $2 WHERE id = $3',
         [data.name, data.description, groupId]
         );
-        revalidatePath(`/community`);
+        revalidatePath(`/community`, 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -687,7 +638,7 @@ export async function deletePostAction(postId: string) {
         
         await client.query('DELETE FROM posts WHERE id = $1', [postId]);
         revalidatePath(`/community/${postRes.rows[0].group_id}`);
-        revalidatePath('/admin/community-management');
+        revalidatePath('/admin', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -786,7 +737,7 @@ export async function deleteCommentAction(commentId: string) {
         
         await client.query('DELETE FROM comments WHERE id = $1', [commentId]);
         revalidatePath(`/community/${commentRes.rows[0].group_id}`);
-        revalidatePath('/admin/community-management');
+        revalidatePath('/admin', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -818,14 +769,11 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
         const existingReaction = await client.query('SELECT reaction FROM post_reactions WHERE user_id = $1 AND post_id = $2', [user.id, postId]);
         if (existingReaction.rows.length > 0) {
             if (existingReaction.rows[0].reaction === reaction) {
-                // User is clicking the same reaction again, so remove it
                 await client.query('DELETE FROM post_reactions WHERE user_id = $1 AND post_id = $2', [user.id, postId]);
             } else {
-                // User is changing their reaction
                 await client.query('UPDATE post_reactions SET reaction = $1 WHERE user_id = $2 AND post_id = $3', [reaction, user.id, postId]);
             }
         } else {
-            // No existing reaction, so insert a new one
             await client.query('INSERT INTO post_reactions (user_id, post_id, reaction) VALUES ($1, $2, $3)', [user.id, postId, reaction]);
         }
         await client.query('COMMIT');
@@ -897,7 +845,7 @@ export async function deleteUserAction(userId: string) {
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM users WHERE id = $1', [userId]);
-        revalidatePath("/admin");
+        revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -927,7 +875,7 @@ export async function suspendUserAction(userId: string, days: number) {
             'UPDATE users SET suspended_until = NOW() + ($1 * INTERVAL \'1 day\') WHERE id = $2',
             [days, userId]
         );
-        revalidatePath("/admin");
+        revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -954,7 +902,7 @@ export async function unsuspendUserAction(userId: string) {
     const client = await pool.connect();
     try {
         await client.query('UPDATE users SET suspended_until = NULL WHERE id = $1', [userId]);
-        revalidatePath("/admin");
+        revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -986,7 +934,7 @@ export async function joinGroupAction(groupId: string) {
             [user.id, groupId]
         );
         revalidatePath(`/community/${groupId}`);
-        revalidatePath('/community');
+        revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -1018,7 +966,7 @@ export async function leaveGroupAction(groupId: string) {
             [user.id, groupId]
         );
         revalidatePath(`/community/${groupId}`);
-        revalidatePath('/community');
+        revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
@@ -1043,12 +991,16 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
     const pool = getPool();
     const client = await pool.connect();
     try {
+        const newName = data.name || user.name;
+        const newEmail = data.email || user.email;
+        const newCountry = data.country || user.country;
+        const newDietaryPreference = data.dietaryPreference || user.dietaryPreference;
+
         await client.query(
             `UPDATE users SET name = $1, email = $2, country = $3, dietary_preference = $4, avatar_seed = $5 WHERE id = $6`,
-            [data.name || user.name, data.email || user.email, data.country || user.country, data.dietaryPreference || user.dietaryPreference, data.name || user.name, user.id]
+            [newName, newEmail, newCountry, newDietaryPreference, newName, user.id]
         );
 
-        // Update the cookie with the new data
         const updatedUser = { ...user, ...data };
          if (data.name) {
             updatedUser.avatar = data.name;
@@ -1088,12 +1040,13 @@ export async function updateFavoriteCuisinesAction(cuisines: string[]) {
         await client.query('BEGIN');
         await client.query('DELETE FROM user_favorite_cuisines WHERE user_id = $1', [user.id]);
         if (cuisines.length > 0) {
-            const values = cuisines.map(c => `('${user.id}', '${c}')`).join(',');
-            await client.query(`INSERT INTO user_favorite_cuisines (user_id, region) VALUES ${values}`);
+            const valuesPlaceholder = cuisines.map((_, index) => `($1, $${index + 2})`).join(', ');
+            const queryText = `INSERT INTO user_favorite_cuisines (user_id, region) VALUES ${valuesPlaceholder}`;
+            const queryValues = [user.id, ...cuisines];
+            await client.query(queryText, queryValues);
         }
         await client.query('COMMIT');
 
-         // Update the cookie
         const updatedUser = { ...user, favoriteCuisines: cuisines };
         cookieStore.set("user", JSON.stringify(updatedUser), {
             httpOnly: true,
@@ -1130,13 +1083,13 @@ export async function toggleFavoriteAction(recipeId: string) {
     let isCurrentlyFavorite = user.favorites.includes(recipeId);
 
     try {
+        await client.query('BEGIN');
         if (isCurrentlyFavorite) {
             await client.query('DELETE FROM user_favorites WHERE user_id = $1 AND recipe_id = $2', [user.id, recipeId]);
         } else {
             await client.query('INSERT INTO user_favorites (user_id, recipe_id) VALUES ($1, $2)', [user.id, recipeId]);
         }
         
-        // Update user's favorites in the cookie
         const updatedFavorites = isCurrentlyFavorite
             ? user.favorites.filter(id => id !== recipeId)
             : [...user.favorites, recipeId];
@@ -1148,12 +1101,15 @@ export async function toggleFavoriteAction(recipeId: string) {
             maxAge: 60 * 60 * 24 * 7,
             path: '/',
         });
+        
+        await client.query('COMMIT');
 
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath('/profile');
         revalidatePath('/');
         return { success: true, isFavorite: !isCurrentlyFavorite };
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error("Error toggling favorite:", error);
         return { success: false, isFavorite: isCurrentlyFavorite, error: "Database error occurred." };
     } finally {

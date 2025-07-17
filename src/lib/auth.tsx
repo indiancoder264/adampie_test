@@ -1,8 +1,8 @@
-
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect, useTransition } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { updateUserAction, updateFavoriteCuisinesAction, toggleFavoriteAction } from "./actions";
 
 export type User = {
   id: string;
@@ -20,7 +20,6 @@ export type User = {
 
 type AuthContextType = {
   user: User | null;
-  logout: () => void;
   toggleFavorite: (recipeId: string) => void;
   updateUser: (data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) => void;
   updateFavoriteCuisines: (cuisines: string[]) => void;
@@ -28,45 +27,14 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Helper function to set a cookie on the client for optimistic updates
-const setClientCookie = (name: string, value: string, days: number) => {
-  let expires = "";
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = "; expires=" + date.toUTCString();
-  }
-  document.cookie = name + "=" + (value || "") + expires + "; path=/";
-}
-
-const eraseCookie = (name: string) => {
-  document.cookie = name+'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-}
-
 export const AuthProvider = ({ children, initialUser }: { children: ReactNode; initialUser: User | null }) => {
   const [user, setUser] = useState<User | null>(initialUser);
+  const [isPending, startTransition] = useTransition();
+  const { toast } = useToast();
 
-  // This effect keeps the client-side state in sync with the server-provided prop.
-  // This is crucial for reflecting the login state after a `router.refresh()`.
   useEffect(() => {
     setUser(initialUser);
   }, [initialUser]);
-
-  const { toast } = useToast();
-
-  const logout = () => {
-    eraseCookie("user");
-    window.location.href = '/'; 
-  };
-  
-  const updateUserAndCookie = (updatedUser: User | null) => {
-      setUser(updatedUser);
-      if (updatedUser) {
-          setClientCookie("user", JSON.stringify(updatedUser), 7);
-      } else {
-          eraseCookie("user");
-      }
-  };
 
   const toggleFavorite = (recipeId: string) => {
     if (!user) {
@@ -77,40 +45,43 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
       });
       return;
     }
-
-    const isFavorite = user.favorites.includes(recipeId);
     
-    const updatedUser = {
-        ...user,
-        favorites: isFavorite
-            ? user.favorites.filter(id => id !== recipeId)
-            : [...user.favorites, recipeId],
-    };
-    updateUserAndCookie(updatedUser);
-
-    if (!isFavorite) {
-        toast({ title: "Added to Favorites!" });
-    } else {
-        toast({ title: "Removed from Favorites" });
-    }
+    startTransition(async () => {
+      const result = await toggleFavoriteAction(recipeId);
+      if (result.success) {
+        toast({ title: result.isFavorite ? "Added to Favorites!" : "Removed from Favorites" });
+      } else {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+      }
+    });
   };
 
   const updateUser = (data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) => {
       if (!user) return;
-      const updatedUser = { ...user, ...data };
-      if (data.name) {
-        updatedUser.avatar = data.name;
-      }
-      updateUserAndCookie(updatedUser);
+      startTransition(async () => {
+        const result = await updateUserAction(data);
+        if (result.success) {
+            toast({ title: "Profile Updated", description: "Your details have been saved." });
+        } else {
+            toast({ title: "Error", description: result.error, variant: "destructive" });
+        }
+      });
   };
 
   const updateFavoriteCuisines = (cuisines: string[]) => {
     if (!user) return;
-    updateUserAndCookie({ ...user, favoriteCuisines: cuisines });
+    startTransition(async () => {
+        const result = await updateFavoriteCuisinesAction(cuisines);
+         if (result.success) {
+            toast({ title: "Cuisines Updated", description: "Your favorite cuisines have been saved." });
+        } else {
+            toast({ title: "Error", description: result.error, variant: "destructive" });
+        }
+    });
   };
 
   return (
-    <AuthContext.Provider value={{ logout, toggleFavorite, updateUser, updateFavoriteCuisines, user }}>
+    <AuthContext.Provider value={{ user, toggleFavorite, updateUser, updateFavoriteCuisines }}>
       {children}
     </AuthContext.Provider>
   );
