@@ -204,6 +204,7 @@ export async function fetchGroups(): Promise<Group[]> {
                                 'image_url', r.image_url,
                                 'description', r.description
                             ) ELSE NULL END,
+                            'reports', COALESCE(rep_post.reports, '[]'::jsonb),
                             'likes', COALESCE(l.likes, '[]'::jsonb),
                             'dislikes', COALESCE(dl.dislikes, '[]'::jsonb),
                             'comments', COALESCE(c.comments, '[]'::jsonb)
@@ -219,6 +220,14 @@ export async function fetchGroups(): Promise<Group[]> {
                     SELECT post_id, jsonb_agg(user_id) as dislikes FROM post_reactions WHERE reaction = 'dislike' GROUP BY post_id
                 ) dl ON p.id = dl.post_id
                 LEFT JOIN (
+                    SELECT 
+                        content_id as post_id,
+                        jsonb_agg(jsonb_build_object('reporter_id', reporter_id, 'reason', reason, 'details', details)) as reports
+                    FROM reports
+                    WHERE content_type = 'post'
+                    GROUP BY content_id
+                ) rep_post ON p.id = rep_post.post_id
+                LEFT JOIN (
                     SELECT
                         c.post_id,
                         jsonb_agg(
@@ -228,11 +237,20 @@ export async function fetchGroups(): Promise<Group[]> {
                                 'author_name', cu.name,
                                 'content', c.content,
                                 'created_at', c.created_at,
-                                'updated_at', c.updated_at
+                                'updated_at', c.updated_at,
+                                'reports', COALESCE(rep_comment.reports, '[]'::jsonb)
                             ) ORDER BY c.created_at ASC
                         ) as comments
                     FROM comments c
                     JOIN users cu ON c.author_id = cu.id
+                    LEFT JOIN (
+                        SELECT 
+                            content_id as comment_id,
+                            jsonb_agg(jsonb_build_object('reporter_id', reporter_id, 'reason', reason, 'details', details)) as reports
+                        FROM reports
+                        WHERE content_type = 'comment'
+                        GROUP BY content_id
+                    ) rep_comment ON c.id = rep_comment.comment_id
                     GROUP BY c.post_id
                 ) c ON p.id = c.post_id
                 GROUP BY p.group_id
