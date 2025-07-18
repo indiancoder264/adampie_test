@@ -1,3 +1,4 @@
+
 "use client";
 
 import React from "react";
@@ -7,6 +8,8 @@ import { useAuth, type User } from "@/lib/auth";
 import { useRecipes, type Recipe, type Tip } from "@/lib/recipes";
 import { useCommunity } from "@/lib/community";
 import { useToast } from "@/hooks/use-toast";
+import { formatDistanceToNow, addDays } from "date-fns";
+import { changePasswordAction, updateUserAction, updateFavoriteCuisinesAction } from "@/lib/actions";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -24,6 +27,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+
+
+const passwordSchema = z.object({
+    currentPassword: z.string().min(1, "Current password is required."),
+    newPassword: z.string().min(8, "New password must be at least 8 characters."),
+    confirmPassword: z.string()
+}).refine(data => data.newPassword === data.confirmPassword, {
+    message: "New passwords do not match.",
+    path: ["confirmPassword"],
+});
+
 
 // Component for displaying a user's submitted tip
 function UserTip({ tip, recipe }: { tip: Tip; recipe: Recipe }) {
@@ -54,6 +73,11 @@ export default function ProfilePage() {
   const allCuisines = React.useMemo(() => {
     return [...new Set(recipes.map(recipe => recipe.region))].sort();
   }, [recipes]);
+
+  const passwordForm = useForm<z.infer<typeof passwordSchema>>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
 
   React.useEffect(() => {
     if (!user) {
@@ -94,14 +118,14 @@ export default function ProfilePage() {
     updateUser({ name, email, country, dietaryPreference });
   };
 
-  const handlePasswordUpdate = (e: React.FormEvent) => {
-    e.preventDefault();
-    // This is a mock since we don't have a real backend
-    (e.target as HTMLFormElement).reset();
-    toast({
-      title: "Password Updated!",
-      description: "In a real app, your password would be changed.",
-    });
+  const handlePasswordUpdate = async (values: z.infer<typeof passwordSchema>) => {
+    const result = await changePasswordAction(values);
+    if (result.success) {
+        toast({ title: "Password Updated!", description: "Your password has been changed successfully." });
+        passwordForm.reset();
+    } else {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+    }
   };
 
   const handleSaveCuisines = () => {
@@ -119,6 +143,9 @@ export default function ProfilePage() {
   const getAvatarUrl = (seed: string) => {
     return `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(seed)}`;
   };
+  
+  const nextNameChangeDate = user.nameLastChangedAt ? addDays(new Date(user.nameLastChangedAt), 7) : undefined;
+  const isNameChangeBlocked = !!(nextNameChangeDate && new Date() < nextNameChangeDate);
 
   return (
     <div className="container mx-auto max-w-5xl px-4 py-8">
@@ -152,7 +179,12 @@ export default function ProfilePage() {
                 <form onSubmit={handleProfileUpdate} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Name</Label>
-                    <Input id="name" value={name} onChange={e => setName(e.target.value)} />
+                    <Input id="name" value={name} onChange={e => setName(e.target.value)} disabled={isNameChangeBlocked} />
+                    {isNameChangeBlocked && nextNameChangeDate && (
+                        <p className="text-xs text-muted-foreground">
+                            You can change your name again in {formatDistanceToNow(nextNameChangeDate)}.
+                        </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
@@ -201,17 +233,46 @@ export default function ProfilePage() {
                 <CardDescription>Choose a new password for your account.</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handlePasswordUpdate} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="current-password">Current Password</Label>
-                    <Input id="current-password" type="password" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">New Password</Label>
-                    <Input id="new-password" type="password" />
-                  </div>
-                  <Button type="submit">Update Password</Button>
-                </form>
+                <Form {...passwordForm}>
+                    <form onSubmit={passwordForm.handleSubmit(handlePasswordUpdate)} className="space-y-4">
+                      <FormField
+                          control={passwordForm.control}
+                          name="currentPassword"
+                          render={({ field }) => (
+                          <FormItem>
+                              <Label>Current Password</Label>
+                              <FormControl><Input type="password" {...field} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                          )}
+                      />
+                      <FormField
+                          control={passwordForm.control}
+                          name="newPassword"
+                          render={({ field }) => (
+                          <FormItem>
+                              <Label>New Password</Label>
+                              <FormControl><Input type="password" {...field} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                          )}
+                      />
+                      <FormField
+                          control={passwordForm.control}
+                          name="confirmPassword"
+                          render={({ field }) => (
+                          <FormItem>
+                              <Label>Confirm New Password</Label>
+                              <FormControl><Input type="password" {...field} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                          )}
+                      />
+                      <Button type="submit" disabled={passwordForm.formState.isSubmitting}>
+                        {passwordForm.formState.isSubmitting ? 'Updating...' : 'Update Password'}
+                      </Button>
+                    </form>
+                </Form>
               </CardContent>
             </Card>
           </div>
@@ -339,3 +400,5 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+    

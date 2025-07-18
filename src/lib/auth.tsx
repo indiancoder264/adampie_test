@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useTransition } from "react";
@@ -16,6 +17,10 @@ export type User = {
   country: string;
   dietaryPreference: 'All' | 'Vegetarian' | 'Non-Vegetarian' | 'Vegan';
   avatar: string; // seed for DiceBear or 'none'
+  // Rate limiting fields
+  passwordChangeAttempts?: number;
+  lastPasswordAttemptAt?: string;
+  nameLastChangedAt?: string;
 };
 
 type AuthContextType = {
@@ -50,6 +55,14 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
       const result = await toggleFavoriteAction(recipeId);
       if (result.success) {
         toast({ title: result.isFavorite ? "Added to Favorites!" : "Removed from Favorites" });
+        // Optimistically update user state
+        setUser(prevUser => {
+          if (!prevUser) return null;
+          const newFavorites = result.isFavorite
+            ? [...prevUser.favorites, recipeId]
+            : prevUser.favorites.filter(id => id !== recipeId);
+          return { ...prevUser, favorites: newFavorites };
+        });
       } else {
         toast({ title: "Error", description: result.error, variant: "destructive" });
       }
@@ -62,6 +75,7 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
         const result = await updateUserAction(data);
         if (result.success) {
             toast({ title: "Profile Updated", description: "Your details have been saved." });
+            setUser(prevUser => prevUser ? { ...prevUser, ...data } : null);
         } else {
             toast({ title: "Error", description: result.error, variant: "destructive" });
         }
@@ -74,6 +88,7 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
         const result = await updateFavoriteCuisinesAction(cuisines);
          if (result.success) {
             toast({ title: "Cuisines Updated", description: "Your favorite cuisines have been saved." });
+            setUser(prevUser => prevUser ? { ...prevUser, favoriteCuisines: cuisines } : null);
         } else {
             toast({ title: "Error", description: result.error, variant: "destructive" });
         }

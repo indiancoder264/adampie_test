@@ -41,6 +41,7 @@ export default function LoginPage() {
         description: `Welcome back!`,
       });
       // A full page refresh is needed to securely read the httpOnly cookie
+      // Redirect to admin page if user is admin, otherwise home
       router.push(result.isAdmin ? "/admin" : "/");
       router.refresh(); 
     } else {

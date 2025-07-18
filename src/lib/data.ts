@@ -17,6 +17,61 @@ function isGroup(group: any): group is Group {
     return group && typeof group.id === 'string' && typeof group.name === 'string';
 }
 
+export async function fetchUserById(userId: string): Promise<User | null> {
+    try {
+        const pool = getPool();
+        const result = await pool.query(`
+            SELECT 
+                u.id, 
+                u.name, 
+                u.email, 
+                u.is_admin AS "isAdmin",
+                u.suspended_until,
+                u.country,
+                u.dietary_preference AS "dietaryPreference",
+                u.avatar_seed as "avatar",
+                u.password_change_attempts,
+                u.last_password_attempt_at,
+                u.name_last_changed_at,
+                COALESCE(favs.favorites, '[]'::jsonb) as favorites,
+                COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as "favoriteCuisines",
+                -- Mocking readHistory for now as it's not in the DB schema
+                '[]'::jsonb as "readHistory"
+            FROM users u
+            LEFT JOIN (
+                SELECT user_id, jsonb_agg(recipe_id) as favorites
+                FROM user_favorites
+                GROUP BY user_id
+            ) favs ON u.id = favs.user_id
+            LEFT JOIN (
+                SELECT user_id, jsonb_agg(region) as favorite_cuisines
+                FROM user_favorite_cuisines
+                GROUP BY user_id
+            ) fav_cuisines ON u.id = fav_cuisines.user_id
+            WHERE u.id = $1
+        `, [userId]);
+
+        if (result.rows.length === 0) {
+            return null;
+        }
+
+        const user = result.rows[0];
+        
+        return {
+            ...user,
+            suspendedUntil: user.suspended_until ? new Date(user.suspended_until).toISOString() : undefined,
+            lastPasswordAttemptAt: user.last_password_attempt_at ? new Date(user.last_password_attempt_at).toISOString() : undefined,
+            nameLastChangedAt: user.name_last_changed_at ? new Date(user.name_last_changed_at).toISOString() : undefined,
+            favorites: user.favorites || [],
+            favoriteCuisines: user.favoriteCuisines || [],
+            readHistory: user.readHistory || [],
+        };
+    } catch (error) {
+        console.error(`Failed to fetch user with id ${userId}:`, error);
+        return null;
+    }
+}
+
 export async function fetchUsers(): Promise<User[]> {
     try {
         const pool = getPool();
@@ -48,6 +103,7 @@ export async function fetchUsers(): Promise<User[]> {
         `);
         return result.rows.map(row => ({
             ...row,
+            suspendedUntil: row.suspendedUntil ? new Date(row.suspendedUntil).toISOString() : undefined,
             favorites: row.favorites || [],
             favoriteCuisines: row.favoriteCuisines || [],
             readHistory: row.readHistory || [],
