@@ -1,11 +1,8 @@
--- This script contains all the necessary SQL commands to set up the RecipeRadar database schema.
--- It can be executed directly in the Supabase SQL Editor.
 
--- -------------------------------------------------------------
--- 1. Automated Trigger Functions
--- -------------------------------------------------------------
+-- Enable the pgcrypto extension for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Function to automatically update the 'updated_at' column on row modification.
+-- Automated function to update the 'updated_at' timestamp on row modification
 CREATE OR REPLACE FUNCTION update_modified_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -14,37 +11,30 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Function to denormalize and update the recipe rating when a tip is changed.
+-- Automated function to update denormalized ratings on the recipes table
 CREATE OR REPLACE FUNCTION update_recipe_rating()
 RETURNS TRIGGER AS $$
+DECLARE
+    recipe_to_update UUID;
 BEGIN
-    -- Check if the operation is on the 'tips' table to determine which recipe_id to use
-    IF (TG_OP = 'DELETE') THEN
-        -- On delete, the NEW record is null, so we use the OLD record
-        UPDATE recipes
-        SET
-            rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = OLD.recipe_id),
-            average_rating = (SELECT AVG(rating) FROM tips WHERE recipe_id = OLD.recipe_id)
-        WHERE id = OLD.recipe_id;
-        RETURN OLD;
+    IF TG_OP = 'DELETE' THEN
+        recipe_to_update := OLD.recipe_id;
     ELSE
-        -- On insert or update, we use the NEW record
-        UPDATE recipes
-        SET
-            rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = NEW.recipe_id),
-            average_rating = (SELECT AVG(rating) FROM tips WHERE recipe_id = NEW.recipe_id)
-        WHERE id = NEW.recipe_id;
-        RETURN NEW;
+        recipe_to_update := NEW.recipe_id;
     END IF;
+
+    UPDATE recipes
+    SET
+        rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = recipe_to_update),
+        average_rating = COALESCE((SELECT AVG(rating) FROM tips WHERE recipe_id = recipe_to_update), 0)
+    WHERE id = recipe_to_update;
+
+    RETURN NULL; -- result is ignored since this is an AFTER trigger
 END;
 $$ language 'plpgsql';
 
 
--- -------------------------------------------------------------
--- 2. Tables
--- -------------------------------------------------------------
-
--- Stores information about registered users.
+-- Table for users
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
@@ -55,14 +45,36 @@ CREATE TABLE users (
     country VARCHAR(100),
     dietary_preference VARCHAR(50) CHECK (dietary_preference IN ('All', 'Vegetarian', 'Non-Vegetarian', 'Vegan')),
     avatar_seed VARCHAR(255) NOT NULL,
+    
+    -- Email Verification Fields
     is_verified BOOLEAN DEFAULT FALSE,
     verification_otp CHAR(6),
     verification_otp_expires TIMESTAMPTZ,
+    verification_emails_sent SMALLINT DEFAULT 0,
+    last_verification_email_sent_at TIMESTAMPTZ,
+    
+    -- Rate Limiting Fields
+    password_change_attempts SMALLINT DEFAULT 0,
+    last_password_attempt_at TIMESTAMPTZ,
+    name_last_changed_at TIMESTAMPTZ,
+    
+    -- General Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores all core recipe data.
+-- Indexes for users table
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_verification_otp ON users(verification_otp);
+
+-- Trigger for users table
+CREATE TRIGGER update_users_modtime
+    BEFORE UPDATE ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+
+-- Table for recipes
 CREATE TABLE recipes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -83,7 +95,17 @@ CREATE TABLE recipes (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores the ingredients for each recipe.
+-- Index for recipes table
+CREATE INDEX idx_recipes_region ON recipes(region);
+
+-- Trigger for recipes table
+CREATE TRIGGER update_recipes_modtime
+    BEFORE UPDATE ON recipes
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+
+-- Table for ingredients
 CREATE TABLE ingredients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -92,7 +114,11 @@ CREATE TABLE ingredients (
     display_order SMALLINT NOT NULL
 );
 
--- Stores the cooking steps for each recipe.
+-- Index for ingredients table
+CREATE INDEX idx_ingredients_recipe_id ON ingredients(recipe_id);
+
+
+-- Table for steps
 CREATE TABLE steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -101,7 +127,11 @@ CREATE TABLE steps (
     UNIQUE(recipe_id, step_number)
 );
 
--- Stores user-submitted tips and ratings for recipes.
+-- Index for steps table
+CREATE INDEX idx_steps_recipe_id_step_number ON steps(recipe_id, step_number);
+
+
+-- Table for tips
 CREATE TABLE tips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -113,7 +143,23 @@ CREATE TABLE tips (
     UNIQUE(user_id, recipe_id)
 );
 
--- Junction table for users and their favorite recipes.
+-- Indexes for tips table
+CREATE INDEX idx_tips_recipe_id ON tips(recipe_id);
+CREATE INDEX idx_tips_user_id ON tips(user_id);
+
+-- Triggers for tips table
+CREATE TRIGGER update_tips_modtime
+    BEFORE UPDATE ON tips
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+CREATE TRIGGER update_rating_on_tip_change
+    AFTER INSERT OR UPDATE OR DELETE ON tips
+    FOR EACH ROW
+    EXECUTE FUNCTION update_recipe_rating();
+
+
+-- Junction table for user favorites
 CREATE TABLE user_favorites (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -121,24 +167,33 @@ CREATE TABLE user_favorites (
     PRIMARY KEY (user_id, recipe_id)
 );
 
--- Junction table for users and their favorite cuisines.
+
+-- Junction table for user favorite cuisines
 CREATE TABLE user_favorite_cuisines (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     region VARCHAR(100) NOT NULL,
     PRIMARY KEY (user_id, region)
 );
 
--- Stores community group information.
+
+-- Table for community groups
 CREATE TABLE groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    creator_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+    creator_id UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Junction table for users and the groups they are members of.
+-- Trigger for groups table
+CREATE TRIGGER update_groups_modtime
+    BEFORE UPDATE ON groups
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+
+-- Junction table for group members
 CREATE TABLE group_members (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -146,7 +201,8 @@ CREATE TABLE group_members (
     PRIMARY KEY (user_id, group_id)
 );
 
--- Stores posts made within a community group.
+
+-- Table for posts in groups
 CREATE TABLE posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -156,7 +212,17 @@ CREATE TABLE posts (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores comments made on posts.
+-- Index for posts table
+CREATE INDEX idx_posts_group_id ON posts(group_id);
+
+-- Trigger for posts table
+CREATE TRIGGER update_posts_modtime
+    BEFORE UPDATE ON posts
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+
+-- Table for comments on posts
 CREATE TABLE comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -166,10 +232,18 @@ CREATE TABLE comments (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Defines the type for post reactions.
-CREATE TYPE reaction_type AS ENUM ('like', 'dislike');
+-- Index for comments table
+CREATE INDEX idx_comments_post_id ON comments(post_id);
 
--- Manages likes and dislikes on posts.
+-- Trigger for comments table
+CREATE TRIGGER update_comments_modtime
+    BEFORE UPDATE ON comments
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_column();
+
+
+-- Table for post reactions
+CREATE TYPE reaction_type AS ENUM ('like', 'dislike');
 CREATE TABLE post_reactions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -178,10 +252,9 @@ CREATE TABLE post_reactions (
     PRIMARY KEY (user_id, post_id)
 );
 
--- Defines the type for reportable content.
-CREATE TYPE reportable_content_type AS ENUM ('post', 'comment');
 
--- Polymorphic table to handle reports for different types of content.
+-- Table for content reports
+CREATE TYPE reportable_content_type AS ENUM ('post', 'comment');
 CREATE TABLE reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -193,65 +266,5 @@ CREATE TABLE reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-
--- -------------------------------------------------------------
--- 3. Indexes
--- -------------------------------------------------------------
-
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_verification_otp ON users(verification_otp);
-CREATE INDEX idx_recipes_region ON recipes(region);
-CREATE INDEX idx_ingredients_recipe_id ON ingredients(recipe_id);
-CREATE INDEX idx_steps_recipe_id_step_number ON steps(recipe_id, step_number);
-CREATE INDEX idx_tips_recipe_id ON tips(recipe_id);
-CREATE INDEX idx_tips_user_id ON tips(user_id);
-CREATE INDEX idx_posts_group_id ON posts(group_id);
-CREATE INDEX idx_comments_post_id ON comments(post_id);
+-- Index for reports table
 CREATE INDEX idx_reports_content ON reports(content_type, content_id);
-
-
--- -------------------------------------------------------------
--- 4. Triggers
--- -------------------------------------------------------------
-
--- Trigger to auto-update the 'updated_at' column on the 'users' table.
-CREATE TRIGGER update_users_modtime
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-
--- Trigger to auto-update the 'updated_at' column on the 'recipes' table.
-CREATE TRIGGER update_recipes_modtime
-    BEFORE UPDATE ON recipes
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-
--- Trigger to auto-update the 'updated_at' column on the 'tips' table.
-CREATE TRIGGER update_tips_modtime
-    BEFORE UPDATE ON tips
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-
--- Trigger to update denormalized ratings on the 'recipes' table whenever a tip is changed.
-CREATE TRIGGER update_rating_on_tip_change
-    AFTER INSERT OR UPDATE OR DELETE ON tips
-    FOR EACH ROW
-    EXECUTE FUNCTION update_recipe_rating();
-
--- Trigger to auto-update the 'updated_at' column on the 'groups' table.
-CREATE TRIGGER update_groups_modtime
-    BEFORE UPDATE ON groups
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-
--- Trigger to auto-update the 'updated_at' column on the 'posts' table.
-CREATE TRIGGER update_posts_modtime
-    BEFORE UPDATE ON posts
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-
--- Trigger to auto-update the 'updated_at' column on the 'comments' table.
-CREATE TRIGGER update_comments_modtime
-    BEFORE UPDATE ON comments
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
