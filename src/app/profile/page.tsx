@@ -9,7 +9,7 @@ import { useRecipes, type Recipe, type Tip } from "@/lib/recipes";
 import { useCommunity } from "@/lib/community";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow, addDays } from "date-fns";
-import { changePasswordAction, updateUserAction, requestEmailChangeAction } from "@/lib/actions";
+import { changePasswordAction, updateUserAction, requestEmailChangeAction, updateFavoriteCuisinesAction } from "@/lib/actions";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,7 @@ function UserTip({ tip, recipe }: { tip: Tip; recipe: Recipe }) {
 
 // Main Profile Page Component
 export default function ProfilePage() {
-  const { user, updateUser, updateFavoriteCuisines } = useAuth();
+  const { user } = useAuth();
   const { recipes } = useRecipes();
   const { groups } = useCommunity();
   const router = useRouter();
@@ -125,9 +125,12 @@ export default function ProfilePage() {
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    let changesMade = false;
   
     // Handle email change separately
     if (email !== user.email) {
+      changesMade = true;
       const result = await requestEmailChangeAction(email);
       if (result.success) {
         toast({
@@ -143,8 +146,24 @@ export default function ProfilePage() {
     }
   
     // Handle other profile updates
-    const otherData = { name, country, dietaryPreference };
-    updateUser(otherData);
+    const dataToUpdate: Partial<Pick<User, 'name' | 'country' | 'dietaryPreference'>> = {};
+    if (name !== user.name) dataToUpdate.name = name;
+    if (country !== user.country) dataToUpdate.country = country;
+    if (dietaryPreference !== user.dietaryPreference) dataToUpdate.dietaryPreference = dietaryPreference;
+    
+    if (Object.keys(dataToUpdate).length > 0) {
+      changesMade = true;
+      const result = await updateUserAction(dataToUpdate);
+      if (result.success) {
+          toast({ title: "Profile Updated", description: "Your details have been saved." });
+      } else {
+          toast({ title: "Error", description: result.error, variant: "destructive" });
+      }
+    }
+
+    if (!changesMade) {
+      toast({ title: "No Changes", description: "You haven't made any changes to your profile." });
+    }
   };
   
   const handleVerifyEmailOtp = async () => {
@@ -152,8 +171,6 @@ export default function ProfilePage() {
         toast({ title: "Invalid Code", description: "Please enter the 6-digit code.", variant: "destructive" });
         return;
     }
-    // We only need to pass the OTP. The server-side action securely knows
-    // which user and which pending email to verify based on the current session.
     const result = await updateUserAction({}, otp);
     if (result.success) {
         toast({ title: "Email Updated!", description: "Your email address has been successfully changed." });
@@ -174,8 +191,13 @@ export default function ProfilePage() {
     }
   };
 
-  const handleSaveCuisines = () => {
-    updateFavoriteCuisines(selectedCuisines);
+  const handleSaveCuisines = async () => {
+    const result = await updateFavoriteCuisinesAction(selectedCuisines);
+    if (result.success) {
+        toast({ title: "Cuisines Updated", description: "Your favorite cuisines have been saved." });
+    } else {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+    }
   };
 
   const favoriteRecipes = recipes.filter(recipe => user.favorites.includes(recipe.id));

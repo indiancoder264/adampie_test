@@ -3,7 +3,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useTransition } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { updateUserAction, updateFavoriteCuisinesAction, toggleFavoriteAction } from "./actions";
+import { toggleFavoriteAction } from "./actions";
 
 export type User = {
   id: string;
@@ -28,8 +28,8 @@ export type User = {
 type AuthContextType = {
   user: User | null;
   toggleFavorite: (recipeId: string) => void;
-  updateUser: (data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) => void;
-  updateFavoriteCuisines: (cuisines: string[]) => void;
+  // Note: updateUser and updateFavoriteCuisines are removed from here
+  // and are now handled directly in the profile page to prevent toast conflicts.
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -71,34 +71,8 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
     });
   };
 
-  const updateUser = (data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) => {
-      if (!user) return;
-      startTransition(async () => {
-        const result = await updateUserAction(data);
-        if (result.success) {
-            toast({ title: "Profile Updated", description: "Your details have been saved." });
-            setUser(prevUser => prevUser ? { ...prevUser, ...data } : null);
-        } else {
-            toast({ title: "Error", description: result.error, variant: "destructive" });
-        }
-      });
-  };
-
-  const updateFavoriteCuisines = (cuisines: string[]) => {
-    if (!user) return;
-    startTransition(async () => {
-        const result = await updateFavoriteCuisinesAction(cuisines);
-         if (result.success) {
-            toast({ title: "Cuisines Updated", description: "Your favorite cuisines have been saved." });
-            setUser(prevUser => prevUser ? { ...prevUser, favoriteCuisines: cuisines } : null);
-        } else {
-            toast({ title: "Error", description: result.error, variant: "destructive" });
-        }
-    });
-  };
-
   return (
-    <AuthContext.Provider value={{ user, toggleFavorite, updateUser, updateFavoriteCuisines }}>
+    <AuthContext.Provider value={{ user, toggleFavorite }}>
       {children}
     </AuthContext.Provider>
   );
