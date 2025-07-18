@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/hover-card"
 import { useAllUsers } from "@/lib/users";
 import { useToast } from "@/hooks/use-toast";
-import { deleteGroupAction, deletePostAction, deleteCommentAction } from "@/lib/actions";
+import { deleteGroupAction, deletePostAction, deleteCommentAction, dismissReportAction } from "@/lib/actions";
 
 export function CommunityManagement() {
   const { groups } = useCommunity();
@@ -110,11 +110,13 @@ export function CommunityManagement() {
     }
   };
 
-  const handleDismissReport = (identifiers: { postId: string; commentId?: string }) => {
-    // This would require a DB change to add a 'dismissed' flag to reports.
-    // For now, it's a placeholder.
-    console.log("Dismissing report (not implemented)", identifiers);
-    toast({ title: "Note", description: "Dismissing reports is not yet implemented."});
+  const handleDismissReport = async (contentId: string, contentType: 'post' | 'comment') => {
+    const result = await dismissReportAction(contentId, contentType);
+    if (result.success) {
+      toast({ title: "Reports Dismissed", description: "All reports for this content have been dismissed." });
+    } else {
+      toast({ title: "Error", description: result.error, variant: "destructive" });
+    }
   }
 
   return (
@@ -226,7 +228,7 @@ export function CommunityManagement() {
                           </HoverCard>
                         </TableCell>
                         <TableCell className="text-right">
-                           <Button variant="ghost" size="icon" onClick={() => handleDismissReport({ postId, commentId })}>
+                           <Button variant="ghost" size="icon" onClick={() => handleDismissReport(item.id, type.toLowerCase() as 'post' | 'comment' )}>
                               <Check className="h-4 w-4" />
                               <span className="sr-only">Dismiss Report</span>
                            </Button>

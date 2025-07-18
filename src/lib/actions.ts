@@ -723,6 +723,27 @@ export async function reportContentAction(contentId: string, contentType: 'post'
     }
 }
 
+export async function dismissReportAction(contentId: string, contentType: 'post' | 'comment') {
+    const cookieStore = await cookies();
+    let user: User | null = null;
+    const userCookie = cookieStore.get("user");
+    if (userCookie) user = JSON.parse(userCookie.value);
+    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
+  
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('UPDATE reports SET is_dismissed = TRUE WHERE content_id = $1 AND content_type = $2', [contentId, contentType]);
+        revalidatePath('/admin', 'layout');
+        return { success: true };
+    } catch (error) {
+        console.error("Error dismissing report:", error);
+        return { success: false, error: 'Failed to dismiss report.' };
+    } finally {
+        client.release();
+    }
+}
+
 
 // --- User Actions ---
 export async function deleteUserAction(userId: string) {

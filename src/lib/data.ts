@@ -224,7 +224,7 @@ export async function fetchGroups(): Promise<Group[]> {
                         content_id as post_id,
                         jsonb_agg(jsonb_build_object('reporter_id', reporter_id, 'reason', reason, 'details', details)) as reports
                     FROM reports
-                    WHERE content_type = 'post'
+                    WHERE content_type = 'post' AND is_dismissed = false
                     GROUP BY content_id
                 ) rep_post ON p.id = rep_post.post_id
                 LEFT JOIN (
@@ -248,7 +248,7 @@ export async function fetchGroups(): Promise<Group[]> {
                             content_id as comment_id,
                             jsonb_agg(jsonb_build_object('reporter_id', reporter_id, 'reason', reason, 'details', details)) as reports
                         FROM reports
-                        WHERE content_type = 'comment'
+                        WHERE content_type = 'comment' AND is_dismissed = false
                         GROUP BY content_id
                     ) rep_comment ON c.id = rep_comment.comment_id
                     GROUP BY c.post_id
