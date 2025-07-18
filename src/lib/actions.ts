@@ -848,7 +848,7 @@ export async function requestEmailChangeAction(newEmail: string) {
 }
 
 
-export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>, otp?: string) {
+export async function updateUserAction(data: Partial<Pick<User, 'name' | 'country' | 'dietaryPreference'>>, otp?: string) {
     const cookieStore = await cookies();
     const userCookie = cookieStore.get("user");
     if (!userCookie) return { success: false, error: "Unauthorized" };
@@ -858,6 +858,7 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
     const client = await pool.connect();
 
     try {
+        await client.query('BEGIN');
         const updates = [];
         const values = [];
         let valueIndex = 1;
@@ -867,6 +868,7 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
                 const lastChange = new Date(user.nameLastChangedAt);
                 const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                 if (lastChange > oneWeekAgo) {
+                    await client.query('ROLLBACK');
                     return { success: false, error: "You can only change your name once every 7 days." };
                 }
             }
@@ -874,25 +876,25 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
             values.push(data.name, data.name);
         }
 
-        if (data.email && data.email !== user.email && otp) {
+        if (otp) { // This block now ONLY handles email change verification
             const result = await client.query(
                 'SELECT pending_new_email, new_email_otp_expires FROM users WHERE id = $1 AND new_email_otp = $2',
                 [user.id, otp]
             );
 
             if (result.rows.length === 0) {
+                await client.query('ROLLBACK');
                 return { success: false, error: "Invalid verification code." };
             }
             const pendingData = result.rows[0];
             if (new Date(pendingData.new_email_otp_expires) < new Date()) {
+                await client.query('ROLLBACK');
                 return { success: false, error: "Verification code has expired." };
             }
-            if (pendingData.pending_new_email !== data.email) {
-                return { success: false, error: "Verification code is for a different email address." };
-            }
-
+            
+            // The new email is valid, so update it and clear temp fields
             updates.push(`email = $${valueIndex++}`, `pending_new_email = NULL`, `new_email_otp = NULL`, `new_email_otp_expires = NULL`);
-            values.push(data.email);
+            values.push(pendingData.pending_new_email);
         }
 
         if (data.country && data.country !== user.country) {
@@ -906,14 +908,18 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
 
         if (updates.length > 0) {
             values.push(user.id);
-            const queryText = `UPDATE users SET ${updates.join(', ')} WHERE id = $${valueIndex}`;
+            const queryText = `UPDATE users SET ${updates.join(', ')} WHERE id = $${valueIndex} RETURNING *`;
             await client.query(queryText, values);
+            await client.query('COMMIT');
             await updateUserCookie(user.id); // Refresh cookie with latest data
+        } else {
+             await client.query('ROLLBACK');
         }
 
         revalidatePath('/profile');
         return { success: true };
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error("Error updating user:", error);
         return { success: false, error: "Database error occurred." };
     } finally {

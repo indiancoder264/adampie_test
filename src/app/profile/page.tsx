@@ -152,7 +152,9 @@ export default function ProfilePage() {
         toast({ title: "Invalid Code", description: "Please enter the 6-digit code.", variant: "destructive" });
         return;
     }
-    const result = await updateUserAction({ email }, otp);
+    // We only need to pass the OTP. The server-side action securely knows
+    // which user and which pending email to verify based on the current session.
+    const result = await updateUserAction({}, otp);
     if (result.success) {
         toast({ title: "Email Updated!", description: "Your email address has been successfully changed." });
         setIsEmailChangePending(false);
