@@ -21,6 +21,8 @@ export type User = {
   passwordChangeAttempts?: number;
   lastPasswordAttemptAt?: string;
   nameLastChangedAt?: string;
+  newEmailRequestsSent?: number;
+  lastNewEmailRequestAt?: string;
 };
 
 type AuthContextType = {

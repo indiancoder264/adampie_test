@@ -817,18 +817,38 @@ export async function requestEmailChangeAction(newEmail: string) {
     const pool = getPool();
     const client = await pool.connect();
     try {
+        await client.query('BEGIN');
+        const dbUserRes = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [user.id]);
+        const dbUser = dbUserRes.rows[0];
+
         // Check if the new email is already in use by another verified user
         const existingEmail = await client.query('SELECT id FROM users WHERE email = $1 AND is_verified = TRUE AND id != $2', [newEmail, user.id]);
         if (existingEmail.rows.length > 0) {
+            await client.query('ROLLBACK');
             return { success: false, error: "This email address is already in use by another account." };
+        }
+
+        // Rate Limiting Logic
+        const now = new Date();
+        const lastRequest = dbUser.last_new_email_request_at ? new Date(dbUser.last_new_email_request_at) : null;
+        let requestsSent = dbUser.new_email_requests_sent;
+
+        if (lastRequest && lastRequest.toDateString() === now.toDateString()) {
+            if (requestsSent >= 2) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "You have requested too many email changes today. Please try again tomorrow." };
+            }
+        } else {
+            // It's a new day, so reset the counter
+            requestsSent = 0;
         }
 
         const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
         await client.query(
-            'UPDATE users SET pending_new_email = $1, new_email_otp = $2, new_email_otp_expires = $3 WHERE id = $4',
-            [newEmail, verificationOtp, otpExpires, user.id]
+            'UPDATE users SET pending_new_email = $1, new_email_otp = $2, new_email_otp_expires = $3, new_email_requests_sent = $4, last_new_email_request_at = NOW() WHERE id = $5',
+            [newEmail, verificationOtp, otpExpires, requestsSent + 1, user.id]
         );
         
         await sendVerificationEmail(
@@ -837,9 +857,12 @@ export async function requestEmailChangeAction(newEmail: string) {
             'Verify Your New RecipeRadar Email',
             'You requested to change your email address on RecipeRadar.'
         );
-
+        
+        await client.query('COMMIT');
+        await updateUserCookie(user.id);
         return { success: true };
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error("Error requesting email change:", error);
         return { success: false, error: "An error occurred. Please try again." };
     } finally {
@@ -864,8 +887,10 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
         let valueIndex = 1;
 
         if (data.name && data.name !== user.name) {
-            if (user.nameLastChangedAt) {
-                const lastChange = new Date(user.nameLastChangedAt);
+            const dbUserRes = await client.query('SELECT name_last_changed_at FROM users WHERE id = $1', [user.id]);
+            const dbUser = dbUserRes.rows[0];
+            if (dbUser.name_last_changed_at) {
+                const lastChange = new Date(dbUser.name_last_changed_at);
                 const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
                 if (lastChange > oneWeekAgo) {
                     await client.query('ROLLBACK');
@@ -876,7 +901,7 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
             values.push(data.name, data.name);
         }
 
-        if (otp) { // This block now ONLY handles email change verification
+        if (otp) {
             const result = await client.query(
                 'SELECT pending_new_email, new_email_otp_expires FROM users WHERE id = $1 AND new_email_otp = $2',
                 [user.id, otp]
@@ -892,7 +917,6 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
                 return { success: false, error: "Verification code has expired." };
             }
             
-            // The new email is valid, so update it and clear temp fields
             updates.push(`email = $${valueIndex++}`, `pending_new_email = NULL`, `new_email_otp = NULL`, `new_email_otp_expires = NULL`);
             values.push(pendingData.pending_new_email);
         }
@@ -911,9 +935,9 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
             const queryText = `UPDATE users SET ${updates.join(', ')} WHERE id = $${valueIndex} RETURNING *`;
             await client.query(queryText, values);
             await client.query('COMMIT');
-            await updateUserCookie(user.id); // Refresh cookie with latest data
+            await updateUserCookie(user.id);
         } else {
-             await client.query('ROLLBACK');
+            await client.query('ROLLBACK');
         }
 
         revalidatePath('/profile');

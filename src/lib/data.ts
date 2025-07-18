@@ -17,6 +17,30 @@ function isGroup(group: any): group is Group {
     return group && typeof group.id === 'string' && typeof group.name === 'string';
 }
 
+function formatUser(dbUser: any): User {
+    return {
+        id: dbUser.id,
+        name: dbUser.name,
+        email: dbUser.email,
+        isAdmin: dbUser.isAdmin,
+        suspendedUntil: dbUser.suspendedUntil ? new Date(dbUser.suspendedUntil).toISOString() : undefined,
+        country: dbUser.country,
+        dietaryPreference: dbUser.dietaryPreference,
+        avatar: dbUser.avatar,
+        // Rate limiting and state fields
+        passwordChangeAttempts: dbUser.password_change_attempts,
+        lastPasswordAttemptAt: dbUser.last_password_attempt_at ? new Date(dbUser.last_password_attempt_at).toISOString() : undefined,
+        nameLastChangedAt: dbUser.name_last_changed_at ? new Date(dbUser.name_last_changed_at).toISOString() : undefined,
+        newEmailRequestsSent: dbUser.new_email_requests_sent,
+        lastNewEmailRequestAt: dbUser.last_new_email_request_at ? new Date(dbUser.last_new_email_request_at).toISOString() : undefined,
+        // JSONB fields with defaults
+        favorites: dbUser.favorites || [],
+        favoriteCuisines: dbUser.favoriteCuisines || [],
+        readHistory: dbUser.readHistory || [],
+    };
+}
+
+
 export async function fetchUserById(userId: string): Promise<User | null> {
     try {
         const pool = getPool();
@@ -26,16 +50,17 @@ export async function fetchUserById(userId: string): Promise<User | null> {
                 u.name, 
                 u.email, 
                 u.is_admin AS "isAdmin",
-                u.suspended_until,
+                u.suspended_until AS "suspendedUntil",
                 u.country,
                 u.dietary_preference AS "dietaryPreference",
                 u.avatar_seed as "avatar",
                 u.password_change_attempts,
                 u.last_password_attempt_at,
                 u.name_last_changed_at,
+                u.new_email_requests_sent,
+                u.last_new_email_request_at,
                 COALESCE(favs.favorites, '[]'::jsonb) as favorites,
                 COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as "favoriteCuisines",
-                -- Mocking readHistory for now as it's not in the DB schema
                 '[]'::jsonb as "readHistory"
             FROM users u
             LEFT JOIN (
@@ -54,18 +79,9 @@ export async function fetchUserById(userId: string): Promise<User | null> {
         if (result.rows.length === 0) {
             return null;
         }
-
-        const user = result.rows[0];
         
-        return {
-            ...user,
-            suspendedUntil: user.suspended_until ? new Date(user.suspended_until).toISOString() : undefined,
-            lastPasswordAttemptAt: user.last_password_attempt_at ? new Date(user.last_password_attempt_at).toISOString() : undefined,
-            nameLastChangedAt: user.name_last_changed_at ? new Date(user.name_last_changed_at).toISOString() : undefined,
-            favorites: user.favorites || [],
-            favoriteCuisines: user.favoriteCuisines || [],
-            readHistory: user.readHistory || [],
-        };
+        return formatUser(result.rows[0]);
+
     } catch (error) {
         console.error(`Failed to fetch user with id ${userId}:`, error);
         return null;
@@ -85,9 +101,13 @@ export async function fetchUsers(): Promise<User[]> {
                 u.country,
                 u.dietary_preference AS "dietaryPreference",
                 u.avatar_seed as "avatar",
+                u.password_change_attempts,
+                u.last_password_attempt_at,
+                u.name_last_changed_at,
+                u.new_email_requests_sent,
+                u.last_new_email_request_at,
                 COALESCE(favs.favorites, '[]'::jsonb) as favorites,
                 COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as "favoriteCuisines",
-                -- Mocking readHistory for now as it's not in the DB schema
                 '[]'::jsonb as "readHistory"
             FROM users u
             LEFT JOIN (
@@ -101,13 +121,7 @@ export async function fetchUsers(): Promise<User[]> {
                 GROUP BY user_id
             ) fav_cuisines ON u.id = fav_cuisines.user_id
         `);
-        return result.rows.map(row => ({
-            ...row,
-            suspendedUntil: row.suspendedUntil ? new Date(row.suspendedUntil).toISOString() : undefined,
-            favorites: row.favorites || [],
-            favoriteCuisines: row.favoriteCuisines || [],
-            readHistory: row.readHistory || [],
-        })).filter(isUser);
+        return result.rows.map(formatUser).filter(isUser);
     } catch (error) {
         console.error('Failed to fetch users:', error);
         return [];
