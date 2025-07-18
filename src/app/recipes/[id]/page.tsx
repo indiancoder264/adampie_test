@@ -69,8 +69,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   <div className="flex items-start gap-4">
                     <Clock className="w-5 h-5 mt-1 text-primary flex-shrink-0" />
                     <p>
-                      <strong>Prep:</strong> {recipe.prep_time} |{" "}
-                      <strong>Cook:</strong> {recipe.cook_time}
+                      <strong>Prep Time:</strong> {recipe.prep_time} |{" "}
+                      <strong>Cook Time:</strong> {recipe.cook_time}
                     </p>
                   </div>
                   <div className="flex items-start gap-4">
