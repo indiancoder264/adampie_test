@@ -986,6 +986,12 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             await updateUserCookie(user.id);
             return { success: false, error: `Incorrect password. You have ${2 - dbUser.password_change_attempts} attempts remaining today.` };
         }
+        
+        // Prevent user from setting the same password
+        const isNewPasswordSame = await bcrypt.compare(data.newPassword, dbUser.password_hash);
+        if (isNewPasswordSame) {
+            return { success: false, error: "Your new password cannot be the same as your old password."};
+        }
 
         const newPasswordHash = await bcrypt.hash(data.newPassword, 10);
         await client.query(

@@ -88,6 +88,8 @@ export default function ProfilePage() {
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
   });
 
+  const newPasswordValue = passwordForm.watch("newPassword");
+
   React.useEffect(() => {
     if (!user) {
       router.push("/login");
@@ -353,7 +355,7 @@ export default function ProfilePage() {
                           render={({ field }) => (
                           <FormItem>
                               <Label>Confirm New Password</Label>
-                              <FormControl><Input type="password" {...field} /></FormControl>
+                              <FormControl><Input type="password" {...field} disabled={!newPasswordValue} /></FormControl>
                               <FormMessage />
                           </FormItem>
                           )}

@@ -32,23 +32,17 @@ export default function AdminPage() {
   const [selectedRecipe, setSelectedRecipe] = React.useState<Recipe | null>(null);
 
   React.useEffect(() => {
-    // Client-side redirect for users who might land here without a full page load
+    // This effect handles cases where auth state changes while the user is on the page.
+    // The initial guard is handled by the server-side check below.
     if (user === null || !user.isAdmin) {
       router.push("/login");
     }
   }, [user, router]);
   
-  // Server-side check for admin status
+  // Primary, server-side guard for admin access.
+  // If the user cookie is not present or the user is not an admin, this will redirect.
   if (user === null || !user.isAdmin) {
-    // Render a loading state or null while waiting for the client-side redirect
-    // This prevents non-admins from seeing admin content briefly
-    return (
-        <div className="flex flex-col items-center justify-center min-h-screen text-center">
-            <Shield className="w-16 h-16 text-primary mb-4" />
-            <h1 className="font-headline text-4xl mb-2">Access Denied</h1>
-            <p className="text-muted-foreground">You do not have permission to view this page.</p>
-        </div>
-    );
+    redirect('/login');
   }
 
   const handleAddRecipe = () => {
