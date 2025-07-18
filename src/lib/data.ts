@@ -22,21 +22,22 @@ function formatUser(dbUser: any): User {
         id: dbUser.id,
         name: dbUser.name,
         email: dbUser.email,
-        isAdmin: dbUser.isAdmin,
-        suspendedUntil: dbUser.suspendedUntil ? new Date(dbUser.suspendedUntil).toISOString() : undefined,
+        isAdmin: dbUser.is_admin,
+        suspendedUntil: dbUser.suspended_until ? new Date(dbUser.suspended_until).toISOString() : undefined,
         country: dbUser.country,
-        dietaryPreference: dbUser.dietaryPreference,
-        avatar: dbUser.avatar,
+        dietaryPreference: dbUser.dietary_preference,
+        avatar: dbUser.avatar_seed,
         // Rate limiting and state fields
         passwordChangeAttempts: dbUser.password_change_attempts,
         lastPasswordAttemptAt: dbUser.last_password_attempt_at ? new Date(dbUser.last_password_attempt_at).toISOString() : undefined,
         nameLastChangedAt: dbUser.name_last_changed_at ? new Date(dbUser.name_last_changed_at).toISOString() : undefined,
         newEmailRequestsSent: dbUser.new_email_requests_sent,
         lastNewEmailRequestAt: dbUser.last_new_email_request_at ? new Date(dbUser.last_new_email_request_at).toISOString() : undefined,
-        // JSONB fields with defaults
+        // JSONB/Array fields with defaults
         favorites: dbUser.favorites || [],
-        favoriteCuisines: dbUser.favoriteCuisines || [],
-        readHistory: dbUser.readHistory || [],
+        favoriteCuisines: dbUser.favorite_cuisines || [],
+        readHistory: dbUser.read_history || [],
+        achievements: dbUser.achievements || [],
     };
 }
 
@@ -46,22 +47,9 @@ export async function fetchUserById(userId: string): Promise<User | null> {
         const pool = getPool();
         const result = await pool.query(`
             SELECT 
-                u.id, 
-                u.name, 
-                u.email, 
-                u.is_admin AS "isAdmin",
-                u.suspended_until AS "suspendedUntil",
-                u.country,
-                u.dietary_preference AS "dietaryPreference",
-                u.avatar_seed as "avatar",
-                u.password_change_attempts,
-                u.last_password_attempt_at,
-                u.name_last_changed_at,
-                u.new_email_requests_sent,
-                u.last_new_email_request_at,
+                u.*,
                 COALESCE(favs.favorites, '[]'::jsonb) as favorites,
-                COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as "favoriteCuisines",
-                '[]'::jsonb as "readHistory"
+                COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as favorite_cuisines
             FROM users u
             LEFT JOIN (
                 SELECT user_id, jsonb_agg(recipe_id) as favorites
@@ -80,6 +68,7 @@ export async function fetchUserById(userId: string): Promise<User | null> {
             return null;
         }
         
+        // This renames columns from snake_case to camelCase for the app
         return formatUser(result.rows[0]);
 
     } catch (error) {
@@ -93,22 +82,9 @@ export async function fetchUsers(): Promise<User[]> {
         const pool = getPool();
         const result = await pool.query(`
             SELECT 
-                u.id, 
-                u.name, 
-                u.email, 
-                u.is_admin AS "isAdmin",
-                u.suspended_until AS "suspendedUntil",
-                u.country,
-                u.dietary_preference AS "dietaryPreference",
-                u.avatar_seed as "avatar",
-                u.password_change_attempts,
-                u.last_password_attempt_at,
-                u.name_last_changed_at,
-                u.new_email_requests_sent,
-                u.last_new_email_request_at,
+                u.*,
                 COALESCE(favs.favorites, '[]'::jsonb) as favorites,
-                COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as "favoriteCuisines",
-                '[]'::jsonb as "readHistory"
+                COALESCE(fav_cuisines.favorite_cuisines, '[]'::jsonb) as favorite_cuisines
             FROM users u
             LEFT JOIN (
                 SELECT user_id, jsonb_agg(recipe_id) as favorites
@@ -205,7 +181,7 @@ export async function fetchGroups(): Promise<Group[]> {
                 COALESCE(m.members, '[]'::jsonb) as members,
                 COALESCE(p.posts, '[]'::jsonb) as posts
             FROM groups g
-            JOIN users u_creator ON g.creator_id = u_creator.id
+            LEFT JOIN users u_creator ON g.creator_id = u_creator.id
             LEFT JOIN (
                 SELECT group_id, jsonb_agg(user_id) as members
                 FROM group_members
@@ -222,6 +198,12 @@ export async function fetchGroups(): Promise<Group[]> {
                             'content', p.content,
                             'created_at', p.created_at,
                             'updated_at', p.updated_at,
+                            'shared_recipe', CASE WHEN p.shared_recipe_id IS NOT NULL THEN jsonb_build_object(
+                                'id', r.id,
+                                'name', r.name,
+                                'image_url', r.image_url,
+                                'description', r.description
+                            ) ELSE NULL END,
                             'likes', COALESCE(l.likes, '[]'::jsonb),
                             'dislikes', COALESCE(dl.dislikes, '[]'::jsonb),
                             'comments', COALESCE(c.comments, '[]'::jsonb)
@@ -229,6 +211,7 @@ export async function fetchGroups(): Promise<Group[]> {
                     ) as posts
                 FROM posts p
                 JOIN users u ON p.author_id = u.id
+                LEFT JOIN recipes r ON p.shared_recipe_id = r.id
                 LEFT JOIN (
                     SELECT post_id, jsonb_agg(user_id) as likes FROM post_reactions WHERE reaction = 'like' GROUP BY post_id
                 ) l ON p.id = l.post_id
@@ -254,6 +237,7 @@ export async function fetchGroups(): Promise<Group[]> {
                 ) c ON p.id = c.post_id
                 GROUP BY p.group_id
             ) p ON g.id = p.group_id
+            WHERE g.creator_id IS NOT NULL
         `);
         return result.rows.map(row => ({
             ...row,

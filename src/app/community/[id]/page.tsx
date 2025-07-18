@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { cn } from "@/lib/utils";
-import { useCommunity, type Post, type Comment, type Report } from "@/lib/community";
+import { useCommunity, type Post, type Comment } from "@/lib/community";
 import { useAuth } from "@/lib/auth";
 import { useAllUsers } from "@/lib/users";
 import { useToast } from "@/hooks/use-toast";
@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Users, Send, ThumbsUp, ThumbsDown, Share2, MoreVertical, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Users, Send, ThumbsUp, ThumbsDown, Share2, MoreVertical, Edit, Trash2, AlertTriangle, ChefHat } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
@@ -58,10 +58,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import Image from "next/image";
 
 
 const postSchema = z.object({
@@ -180,9 +180,7 @@ function ReportDialog({ open, onOpenChange, onSubmit, hasReported }: { open: boo
 
 function CommentDisplay({ comment, postId }: { comment: Comment, postId: string }) {
     const { user } = useAuth();
-    const { allUsers } = useAllUsers();
     const { toast } = useToast();
-    const author = allUsers.find(u => u.id === comment.author_id);
     
     const [displayDate, setDisplayDate] = React.useState("");
     const [isEditDialogOpen, setEditDialogOpen] = React.useState(false);
@@ -238,7 +236,7 @@ function CommentDisplay({ comment, postId }: { comment: Comment, postId: string 
         <>
             <div className="flex items-start gap-3">
                 <Avatar className="h-8 w-8 border">
-                    <AvatarImage src={getAvatarUrl(author?.avatar || 'adventurer')} />
+                    <AvatarImage src={getAvatarUrl(comment.author_name || 'adventurer')} />
                     <AvatarFallback>{comment.author_name.charAt(0)}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
@@ -321,10 +319,8 @@ function CommentDisplay({ comment, postId }: { comment: Comment, postId: string 
 
 function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
   const { user } = useAuth();
-  const { allUsers } = useAllUsers();
   const { toast } = useToast();
   const [displayDate, setDisplayDate] = React.useState("");
-  const author = allUsers.find(u => u.id === post.author_id);
   const [isEditDialogOpen, setEditDialogOpen] = React.useState(false);
   const [isReportDialogOpen, setReportDialogOpen] = React.useState(false);
   const [editedContent, setEditedContent] = React.useState(post.content);
@@ -429,7 +425,7 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
       <Card id={post.id}>
         <CardHeader className="flex flex-row items-start gap-4">
           <Avatar className="h-12 w-12 border">
-              <AvatarImage src={getAvatarUrl(author?.avatar || 'adventurer')} />
+              <AvatarImage src={getAvatarUrl(post.author_name || 'adventurer')} />
               <AvatarFallback>{post.author_name.charAt(0)}</AvatarFallback>
           </Avatar>
           <div className="flex-grow">
@@ -477,7 +473,24 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
           )}
         </CardHeader>
         <CardContent>
-          <p className="whitespace-pre-wrap">{post.content}</p>
+            {post.shared_recipe && (
+                <Link href={`/recipes/${post.shared_recipe.id}`} className="block mb-4 border rounded-lg hover:border-primary transition-colors">
+                    <div className="flex gap-4 p-4">
+                        <div className="relative w-24 h-24 rounded-md overflow-hidden flex-shrink-0">
+                            <Image src={post.shared_recipe.image_url} alt={post.shared_recipe.name} fill style={{objectFit: 'cover'}} />
+                        </div>
+                        <div className="flex-grow">
+                            <div className="flex items-center gap-2 mb-1 text-sm text-primary">
+                                <ChefHat className="h-4 w-4" />
+                                <span>Recipe Shared</span>
+                            </div>
+                            <h4 className="font-headline text-lg leading-tight">{post.shared_recipe.name}</h4>
+                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{post.shared_recipe.description}</p>
+                        </div>
+                    </div>
+                </Link>
+            )}
+            <p className="whitespace-pre-wrap">{post.content}</p>
         </CardContent>
         <CardFooter className="flex-col items-start gap-4">
           <div className="flex w-full items-center justify-between text-sm text-muted-foreground">
@@ -612,7 +625,9 @@ export default function GroupDetailPage() {
   const postsToShow = filteredPosts.slice(0, visiblePostsCount);
 
   if (!group) {
-    notFound();
+    // This could be a loading state in a real app.
+    // For now, if the group isn't found in the client-side context, treat as not found.
+    return notFound();
   }
   
   const isMember = user ? group.members.includes(user.id) : false;

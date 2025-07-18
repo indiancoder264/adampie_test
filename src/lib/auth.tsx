@@ -13,6 +13,7 @@ export type User = {
   favorites: string[]; // array of recipe IDs
   favoriteCuisines: string[];
   readHistory: string[];
+  achievements: string[];
   suspendedUntil?: string;
   country: string;
   dietaryPreference: 'All' | 'Vegetarian' | 'Non-Vegetarian' | 'Vegan';
@@ -63,7 +64,12 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
           const newFavorites = result.isFavorite
             ? [...prevUser.favorites, recipeId]
             : prevUser.favorites.filter(id => id !== recipeId);
-          return { ...prevUser, favorites: newFavorites };
+          
+          const newAchievements = result.isFavorite && !prevUser.achievements.includes('first_favorite')
+            ? [...prevUser.achievements, 'first_favorite']
+            : prevUser.achievements;
+            
+          return { ...prevUser, favorites: newFavorites, achievements: newAchievements };
         });
       } else {
         toast({ title: "Error", description: result.error, variant: "destructive" });

@@ -14,12 +14,13 @@ import {
 } from "@/components/ui/carousel";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import type { Recipe } from '@/lib/recipes';
 import { SearchAndFilter } from '@/components/search-and-filter';
 import { useRecipes } from '@/lib/recipes';
 import { useSearchParams } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/lib/auth';
 
 
 function SearchResults({ query, meal, time }: { query: string; meal: string; time: string; }) {
@@ -80,6 +81,7 @@ function SearchResults({ query, meal, time }: { query: string; meal: string; tim
 
 function HomepageContent() {
   const { recipes } = useRecipes();
+  const { user } = useAuth();
   const searchParams = useSearchParams();
 
   const [isSearchActive, setIsSearchActive] = useState(false);
@@ -94,15 +96,42 @@ function HomepageContent() {
   }, [query, meal, time]);
 
 
-  const { trendingRecipes, recipesByRegion, regions } = React.useMemo(() => {
-    const trending = [...recipes]
-      .filter(r => r.published)
+  const { trendingRecipes, recommendedRecipes, recipesByRegion, regions } = React.useMemo(() => {
+    const publishedRecipes = recipes.filter(r => r.published);
+
+    const trending = [...publishedRecipes]
       .sort((a, b) => (b.favorite_count ?? 0) - (a.favorite_count ?? 0))
       .slice(0, 8);
     
-    const regionSet = [...new Set(recipes.filter(r => r.published).map((recipe) => recipe.region))];
+    let recommended: Recipe[] = [];
+    if (user) {
+        recommended = publishedRecipes.sort((a, b) => {
+            let scoreA = 0;
+            let scoreB = 0;
+            
+            // Score based on favorite cuisines
+            if (user.favoriteCuisines.includes(a.region)) scoreA += 5;
+            if (user.favoriteCuisines.includes(b.region)) scoreB += 5;
 
-    const byRegion = recipes.filter(r => r.published).reduce((acc, recipe) => {
+            // Score based on dietary preference
+            if (user.dietaryPreference === a.dietary_type) scoreA += 3;
+            if (user.dietaryPreference === b.dietary_type) scoreB += 3;
+            
+            // Avoid recommending recipes already read
+            if (user.readHistory.includes(a.id)) scoreA -= 10;
+            if (user.readHistory.includes(b.id)) scoreB -= 10;
+
+            // Add a bit of popularity score
+            scoreA += (a.average_rating / 5) * 2;
+            scoreB += (b.average_rating / 5) * 2;
+            
+            return scoreB - scoreA;
+        }).slice(0, 8);
+    }
+    
+    const regionSet = [...new Set(publishedRecipes.map((recipe) => recipe.region))];
+
+    const byRegion = publishedRecipes.reduce((acc, recipe) => {
         const { region } = recipe;
         if (!acc[region]) acc[region] = [];
         acc[region].push(recipe);
@@ -111,10 +140,11 @@ function HomepageContent() {
 
     return {
       trendingRecipes: trending,
+      recommendedRecipes: recommended,
       recipesByRegion: byRegion,
       regions: regionSet,
     };
-  }, [recipes]);
+  }, [recipes, user]);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -140,6 +170,28 @@ function HomepageContent() {
         <SearchResults query={query} meal={meal} time={time} />
       ) : (
         <>
+          {user && recommendedRecipes.length > 0 && (
+            <section className="mb-12">
+              <div className="flex items-center gap-4 mb-6 border-b-2 border-primary pb-2">
+                <Sparkles className="w-8 h-8 text-accent" />
+                <h2 className="font-headline text-3xl md:text-4xl font-bold">
+                  Recommended For You
+                </h2>
+              </div>
+              <Carousel opts={{ align: "start", loop: false, }} className="w-full">
+                <CarouselContent>
+                  {recommendedRecipes.map((recipe) => (
+                    <CarouselItem key={recipe.id} className="sm:basis-1/2 md:basis-1/3 lg:basis-1/4">
+                      <div className="p-1 h-full"><RecipeCard recipe={recipe} /></div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious className="ml-8" />
+                <CarouselNext className="mr-8" />
+              </Carousel>
+            </section>
+          )}
+
           <section className="mb-12">
             <div className="flex items-center gap-4 mb-6 border-b-2 border-primary pb-2">
               <h2 className="font-headline text-3xl md:text-4xl font-bold">

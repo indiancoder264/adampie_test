@@ -2,7 +2,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
-import type { User } from "@/lib/auth";
+import type { Recipe } from "./recipes";
 
 // Types
 export type Report = {
@@ -32,6 +32,7 @@ export type Post = {
   likes: string[];
   dislikes: string[];
   comments: Comment[];
+  shared_recipe?: Pick<Recipe, 'id' | 'name' | 'image_url' | 'description'>;
 };
 
 export type Group = {
@@ -78,4 +79,3 @@ export const useCommunity = () => {
   }
   return context;
 };
-

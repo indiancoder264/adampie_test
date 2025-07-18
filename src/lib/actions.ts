@@ -351,16 +351,29 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
         await client.query('BEGIN');
         let tipResult;
         const existingTipRes = await client.query('SELECT id FROM tips WHERE recipe_id = $1 AND user_id = $2', [recipeId, user.id]);
+        
+        // Gamification: Unlock "First Tip" achievement
+        const achievementToUnlock = !user.achievements.includes('first_tip');
 
         if (existingTipRes.rows.length > 0) {
             tipResult = await client.query('UPDATE tips SET tip = $1, rating = $2, updated_at = NOW() WHERE id = $3 RETURNING *', [tipData.tip, tipData.rating, existingTipRes.rows[0].id]);
         } else {
             tipResult = await client.query('INSERT INTO tips (recipe_id, user_id, tip, rating) VALUES ($1, $2, $3, $4) RETURNING *', [recipeId, user.id, tipData.tip, tipData.rating]);
+            if (achievementToUnlock) {
+                await client.query(`UPDATE users SET achievements = array_append(achievements, 'first_tip') WHERE id = $1`, [user.id]);
+            }
         }
         await client.query('COMMIT');
+
         const newTipData = tipResult.rows[0];
+
+        if (achievementToUnlock) {
+            await updateUserCookie(user.id);
+        }
+
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath(`/admin`);
+        revalidatePath(`/profile`);
         return { success: true, newTip: { id: newTipData.id, user_id: newTipData.user_id, user_name: user.name, tip: newTipData.tip, rating: newTipData.rating, created_at: newTipData.created_at.toISOString(), updated_at: (newTipData.updated_at || newTipData.created_at).toISOString() }};
     } catch (error) {
         await client.query('ROLLBACK');
@@ -449,8 +462,16 @@ export async function createGroupAction(data: { name: string; description: strin
         const groupRes = await client.query('INSERT INTO groups (name, description, creator_id) VALUES ($1, $2, $3) RETURNING id', [data.name, data.description, user.id]);
         const groupId = groupRes.rows[0].id;
         await client.query('INSERT INTO group_members (user_id, group_id) VALUES ($1, $2)', [user.id, groupId]);
+
+        // Gamification: Unlock "Community Starter" achievement
+        if (!user.achievements.includes('community_starter')) {
+             await client.query(`UPDATE users SET achievements = array_append(achievements, 'community_starter') WHERE id = $1`, [user.id]);
+             await updateUserCookie(user.id);
+        }
+
         await client.query('COMMIT');
         revalidatePath('/community', 'layout');
+        revalidatePath('/profile');
         return { success: true, groupId };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -506,7 +527,7 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 }
 
 // --- Community Content Actions ---
-export async function addPostAction(groupId: string, content: string) {
+export async function addPostAction(groupId: string, content: string, recipeId?: string) {
     const cookieStore = await cookies();
     let user: User | null = null;
     const userCookie = cookieStore.get("user");
@@ -515,7 +536,10 @@ export async function addPostAction(groupId: string, content: string) {
     const pool = getPool();
     const client = await pool.connect();
     try {
-        await client.query('INSERT INTO posts (group_id, author_id, content) VALUES ($1, $2, $3)', [groupId, user.id, content]);
+        await client.query(
+            'INSERT INTO posts (group_id, author_id, content, shared_recipe_id) VALUES ($1, $2, $3, $4)',
+            [groupId, user.id, content, recipeId || null]
+        );
         revalidatePath(`/community/${groupId}`);
         return { success: true };
     } catch (error) {
@@ -1055,6 +1079,10 @@ export async function toggleFavoriteAction(recipeId: string) {
             await client.query('DELETE FROM user_favorites WHERE user_id = $1 AND recipe_id = $2', [user.id, recipeId]);
         } else {
             await client.query('INSERT INTO user_favorites (user_id, recipe_id) VALUES ($1, $2)', [user.id, recipeId]);
+            // Gamification: Unlock "First Favorite" achievement
+            if (!user.achievements.includes('first_favorite')) {
+                await client.query(`UPDATE users SET achievements = array_append(achievements, 'first_favorite') WHERE id = $1`, [user.id]);
+            }
         }
         await client.query('COMMIT');
         await updateUserCookie(user.id);
@@ -1068,5 +1096,29 @@ export async function toggleFavoriteAction(recipeId: string) {
         return { success: false, isFavorite: isCurrentlyFavorite, error: "Database error occurred." };
     } finally {
         client.release();
+    }
+}
+
+export async function logRecipeViewAction(recipeId: string) {
+    const cookieStore = await cookies();
+    const userCookie = cookieStore.get("user");
+    if (!userCookie) return { success: false }; // Fail silently if not logged in
+    
+    let user: User = JSON.parse(userCookie.value);
+    const pool = getPool();
+    
+    try {
+        // Use a SQL query to add the recipe ID to the history array, avoiding duplicates.
+        await pool.query(
+            `UPDATE users 
+             SET read_history = read_history || $1::uuid 
+             WHERE id = $2 AND NOT (read_history @> ARRAY[$1::uuid])`,
+            [recipeId, user.id]
+        );
+        // No need to revalidate paths for this silent action
+        return { success: true };
+    } catch (error) {
+        console.error("Error logging recipe view:", error);
+        return { success: false };
     }
 }

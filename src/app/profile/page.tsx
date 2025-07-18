@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecipeCard } from "@/components/recipe-card";
-import { Shield, FilePenLine, Users, Info } from "lucide-react";
+import { Shield, FilePenLine, Users, Info, Award, MessageSquare, Star, UserPlus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -27,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -37,7 +36,8 @@ import {
   InputOTPGroup,
   InputOTPSeparator,
   InputOTPSlot,
-} from "@/components/ui/input-otp"
+} from "@/components/ui/input-otp";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 
 const passwordSchema = z.object({
@@ -47,6 +47,9 @@ const passwordSchema = z.object({
 }).refine(data => data.newPassword === data.confirmPassword, {
     message: "New passwords do not match.",
     path: ["confirmPassword"],
+}).refine(data => data.currentPassword !== data.newPassword, {
+    message: "New password cannot be the same as the current password.",
+    path: ["newPassword"],
 });
 
 
@@ -61,6 +64,12 @@ function UserTip({ tip, recipe }: { tip: Tip; recipe: Recipe }) {
     </div>
   );
 }
+
+const achievementDetails: Record<string, { icon: React.ElementType, title: string, description: string }> = {
+    'first_tip': { icon: MessageSquare, title: "Helpful Hand", description: "Submitted your first tip." },
+    'first_favorite': { icon: Star, title: "Good Taste", description: "Saved your first favorite recipe." },
+    'community_starter': { icon: UserPlus, title: "Community Starter", description: "Created your first group." },
+};
 
 // Main Profile Page Component
 export default function ProfilePage() {
@@ -231,14 +240,50 @@ export default function ProfilePage() {
       </div>
       
       <Tabs defaultValue="account">
-        <TabsList className="mb-4 grid h-auto grid-cols-2 gap-2 md:inline-flex md:h-10 md:w-auto">
-          <TabsTrigger value="account">Account Settings</TabsTrigger>
-          <TabsTrigger value="favorites">Favorite Recipes ({favoriteRecipes.length})</TabsTrigger>
-          <TabsTrigger value="activity">My Activity ({userTips.length})</TabsTrigger>
+        <TabsList className="mb-4 grid h-auto grid-cols-2 md:grid-cols-4 gap-2">
+          <TabsTrigger value="account">Account</TabsTrigger>
+          <TabsTrigger value="favorites">Favorites ({favoriteRecipes.length})</TabsTrigger>
+          <TabsTrigger value="activity">Activity ({userTips.length})</TabsTrigger>
           <TabsTrigger value="community">Community</TabsTrigger>
         </TabsList>
         
         <TabsContent value="account" className="space-y-8">
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Award className="w-6 h-6 text-accent"/> Achievements</CardTitle>
+                    <CardDescription>Badges you've earned for being an active community member.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {user.achievements.length > 0 ? (
+                        <div className="flex flex-wrap gap-4">
+                            <TooltipProvider>
+                            {user.achievements.map(achId => {
+                                const achievement = achievementDetails[achId];
+                                if (!achievement) return null;
+                                return (
+                                <Tooltip key={achId}>
+                                    <TooltipTrigger asChild>
+                                        <div className="flex flex-col items-center gap-2">
+                                            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center border-2 border-accent">
+                                                <achievement.icon className="w-8 h-8 text-accent" />
+                                            </div>
+                                            <p className="text-sm font-medium">{achievement.title}</p>
+                                        </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>{achievement.description}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                                )
+                            })}
+                            </TooltipProvider>
+                        </div>
+                    ) : (
+                        <p className="text-muted-foreground">Start exploring, favoriting, and contributing to earn badges!</p>
+                    )}
+                </CardContent>
+            </Card>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <Card>
               <CardHeader>
@@ -372,7 +417,7 @@ export default function ProfilePage() {
            <Card>
             <CardHeader>
               <CardTitle>Favorite Cuisines</CardTitle>
-              <CardDescription>Select your preferred types of food and save your choices.</CardDescription>
+              <CardDescription>Select your preferred types of food to get better recommendations.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-6">
