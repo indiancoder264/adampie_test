@@ -35,7 +35,7 @@ async function updateUserCookie(userId: string) {
 
 
 // --- Email Sending ---
-async function sendVerificationEmail(email: string, otp: string) {
+async function sendVerificationEmail(email: string, otp: string, subject: string, preamble: string) {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
       console.error("Resend API key is not configured.");
@@ -47,19 +47,18 @@ async function sendVerificationEmail(email: string, otp: string) {
     try {
         await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
-            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
-            subject: `RecipeRadar Verification for ${email}`,
+            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com', // For testing
+            subject: subject,
             html: `
                 <div style="font-family: sans-serif; text-align: center; padding: 20px;">
-                    <h2>Welcome to RecipeRadar!</h2>
-                    <p>A new account has been registered with the email: <strong>${email}</strong>.</p>
+                    <h2>${preamble}</h2>
                     <p>Your verification code is:</p>
                     <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
                     <p>This code will expire in 10 minutes.</p>
                 </div>
             `,
         });
-        console.log(`Verification email sent for ${email}`);
+        console.log(`Verification email sent to ${email}`);
     } catch (error) {
         console.error("Failed to send verification email:", error);
         throw new Error("Could not send verification email.");
@@ -80,8 +79,8 @@ export async function loginAction(data: { email: string; password: string;}) {
         const client = await pool.connect();
         try {
             // Find or create the admin user in the database
-            let result = await client.query('SELECT * FROM users WHERE email = $1', [adminEmail]);
-            let adminUser;
+            let result = await client.query('SELECT id FROM users WHERE email = $1', [adminEmail]);
+            let adminUserId;
 
             if (result.rows.length === 0) {
                 // If admin user doesn't exist, create one
@@ -91,13 +90,13 @@ export async function loginAction(data: { email: string; password: string;}) {
                      VALUES ($1, $2, $3, TRUE, TRUE, $4, 'USA', 'All') RETURNING id`,
                     ['Admin', adminEmail, passwordHash, 'Admin']
                 );
-                adminUser = await fetchUserById(insertResult.rows[0].id);
+                adminUserId = insertResult.rows[0].id;
             } else {
-                adminUser = await fetchUserById(result.rows[0].id);
+                adminUserId = result.rows[0].id;
             }
 
-            if (adminUser) {
-                await updateUserCookie(adminUser.id);
+            if (adminUserId) {
+                await updateUserCookie(adminUserId);
                 return { success: true, isAdmin: true };
             } else {
                  return { success: false, error: "Failed to create or find admin account." };
@@ -199,7 +198,12 @@ export async function signupAction(data: {name: string, email: string, password:
       [name, email, passwordHash, country, dietaryPreference, name, verificationOtp, otpExpires]
     );
 
-    await sendVerificationEmail(email, verificationOtp);
+    await sendVerificationEmail(
+        email, 
+        verificationOtp, 
+        `RecipeRadar Verification for ${email}`,
+        "Welcome to RecipeRadar!"
+    );
     
     await client.query('COMMIT');
     revalidatePath("/admin");
@@ -804,7 +808,47 @@ export async function leaveGroupAction(groupId: string) {
     }
 }
 
-export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>) {
+export async function requestEmailChangeAction(newEmail: string) {
+    const cookieStore = await cookies();
+    const userCookie = cookieStore.get("user");
+    if (!userCookie) return { success: false, error: "Unauthorized" };
+    let user: User = JSON.parse(userCookie.value);
+  
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        // Check if the new email is already in use by another verified user
+        const existingEmail = await client.query('SELECT id FROM users WHERE email = $1 AND is_verified = TRUE AND id != $2', [newEmail, user.id]);
+        if (existingEmail.rows.length > 0) {
+            return { success: false, error: "This email address is already in use by another account." };
+        }
+
+        const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+        await client.query(
+            'UPDATE users SET pending_new_email = $1, new_email_otp = $2, new_email_otp_expires = $3 WHERE id = $4',
+            [newEmail, verificationOtp, otpExpires, user.id]
+        );
+        
+        await sendVerificationEmail(
+            newEmail, 
+            verificationOtp,
+            'Verify Your New RecipeRadar Email',
+            'You requested to change your email address on RecipeRadar.'
+        );
+
+        return { success: true };
+    } catch (error) {
+        console.error("Error requesting email change:", error);
+        return { success: false, error: "An error occurred. Please try again." };
+    } finally {
+        client.release();
+    }
+}
+
+
+export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email' | 'country' | 'dietaryPreference'>>, otp?: string) {
     const cookieStore = await cookies();
     const userCookie = cookieStore.get("user");
     if (!userCookie) return { success: false, error: "Unauthorized" };
@@ -819,7 +863,6 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
         let valueIndex = 1;
 
         if (data.name && data.name !== user.name) {
-            // Check name change rate limit
             if (user.nameLastChangedAt) {
                 const lastChange = new Date(user.nameLastChangedAt);
                 const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -831,10 +874,27 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'email'
             values.push(data.name, data.name);
         }
 
-        if (data.email && data.email !== user.email) {
-            updates.push(`email = $${valueIndex++}`);
+        if (data.email && data.email !== user.email && otp) {
+            const result = await client.query(
+                'SELECT pending_new_email, new_email_otp_expires FROM users WHERE id = $1 AND new_email_otp = $2',
+                [user.id, otp]
+            );
+
+            if (result.rows.length === 0) {
+                return { success: false, error: "Invalid verification code." };
+            }
+            const pendingData = result.rows[0];
+            if (new Date(pendingData.new_email_otp_expires) < new Date()) {
+                return { success: false, error: "Verification code has expired." };
+            }
+            if (pendingData.pending_new_email !== data.email) {
+                return { success: false, error: "Verification code is for a different email address." };
+            }
+
+            updates.push(`email = $${valueIndex++}`, `pending_new_email = NULL`, `new_email_otp = NULL`, `new_email_otp_expires = NULL`);
             values.push(data.email);
         }
+
         if (data.country && data.country !== user.country) {
             updates.push(`country = $${valueIndex++}`);
             values.push(data.country);
@@ -882,6 +942,7 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
                 return { success: false, error: "You have exceeded the maximum password change attempts for today." };
             }
         } else {
+            // Reset attempts if it's a new day
             await client.query('UPDATE users SET password_change_attempts = 0 WHERE id = $1', [user.id]);
             dbUser.password_change_attempts = 0;
         }

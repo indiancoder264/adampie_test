@@ -9,7 +9,7 @@ import { useRecipes, type Recipe, type Tip } from "@/lib/recipes";
 import { useCommunity } from "@/lib/community";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow, addDays } from "date-fns";
-import { changePasswordAction, updateUserAction, updateFavoriteCuisinesAction } from "@/lib/actions";
+import { changePasswordAction, updateUserAction, requestEmailChangeAction } from "@/lib/actions";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecipeCard } from "@/components/recipe-card";
-import { Shield, FilePenLine, Users } from "lucide-react";
+import { Shield, FilePenLine, Users, Info } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -32,6 +32,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSeparator,
+  InputOTPSlot,
+} from "@/components/ui/input-otp"
 
 
 const passwordSchema = z.object({
@@ -69,6 +75,9 @@ export default function ProfilePage() {
   const [country, setCountry] = React.useState(user?.country || "");
   const [dietaryPreference, setDietaryPreference] = React.useState<User['dietaryPreference']>(user?.dietaryPreference || 'All');
   const [selectedCuisines, setSelectedCuisines] = React.useState<string[]>(user?.favoriteCuisines || []);
+
+  const [isEmailChangePending, setIsEmailChangePending] = React.useState(false);
+  const [otp, setOtp] = React.useState('');
   
   const allCuisines = React.useMemo(() => {
     return [...new Set(recipes.map(recipe => recipe.region))].sort();
@@ -113,9 +122,44 @@ export default function ProfilePage() {
     );
   }
 
-  const handleProfileUpdate = (e: React.FormEvent) => {
+  const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateUser({ name, email, country, dietaryPreference });
+    if (!user) return;
+  
+    // Handle email change separately
+    if (email !== user.email) {
+      const result = await requestEmailChangeAction(email);
+      if (result.success) {
+        toast({
+          title: "Check Your New Email",
+          description: "A verification code has been sent to your new email address.",
+        });
+        setIsEmailChangePending(true);
+      } else {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+        // Revert email in the input field if the request fails
+        setEmail(user.email);
+      }
+    }
+  
+    // Handle other profile updates
+    const otherData = { name, country, dietaryPreference };
+    updateUser(otherData);
+  };
+  
+  const handleVerifyEmailOtp = async () => {
+    if (otp.length !== 6) {
+        toast({ title: "Invalid Code", description: "Please enter the 6-digit code.", variant: "destructive" });
+        return;
+    }
+    const result = await updateUserAction({ email }, otp);
+    if (result.success) {
+        toast({ title: "Email Updated!", description: "Your email address has been successfully changed." });
+        setIsEmailChangePending(false);
+        setOtp('');
+    } else {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+    }
   };
 
   const handlePasswordUpdate = async (values: z.infer<typeof passwordSchema>) => {
@@ -180,15 +224,37 @@ export default function ProfilePage() {
                   <div className="space-y-2">
                     <Label htmlFor="name">Name</Label>
                     <Input id="name" value={name} onChange={e => setName(e.target.value)} disabled={isNameChangeBlocked} />
-                    {isNameChangeBlocked && nextNameChangeDate && (
+                    {isNameChangeBlocked && nextNameChangeDate ? (
                         <p className="text-xs text-muted-foreground">
                             You can change your name again in {formatDistanceToNow(nextNameChangeDate)}.
                         </p>
+                    ) : (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1"><Info className="h-3 w-3" /> You can change your name once per week.</p>
                     )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+                    <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} disabled={isEmailChangePending}/>
+                    {isEmailChangePending && (
+                        <div className="space-y-2 pt-2">
+                             <Label>Enter Verification Code</Label>
+                            <InputOTP maxLength={6} value={otp} onChange={setOtp}>
+                                <InputOTPGroup>
+                                    <InputOTPSlot index={0} />
+                                    <InputOTPSlot index={1} />
+                                    <InputOTPSlot index={2} />
+                                    <InputOTPSeparator />
+                                    <InputOTPSlot index={3} />
+                                    <InputOTPSlot index={4} />
+                                    <InputOTPSlot index={5} />
+                                </InputOTPGroup>
+                            </InputOTP>
+                            <Button type="button" size="sm" onClick={handleVerifyEmailOtp} className="w-full">Verify New Email</Button>
+                            <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => { setIsEmailChangePending(false); setEmail(user.email); }}>
+                                Cancel Email Change
+                            </Button>
+                        </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="country">Country</Label>
@@ -400,5 +466,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-
-    
