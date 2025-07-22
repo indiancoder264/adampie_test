@@ -189,7 +189,10 @@ function CommentDisplay({ comment, postId }: { comment: Comment, postId: string 
 
     const isCommentAuthor = user?.id === comment.author_id;
     const hasReported = user ? (comment.reports || []).some(r => r.reporter_id === user.id) : false;
-    const isEdited = comment.updated_at;
+    
+    const createdAt = new Date(comment.created_at).getTime();
+    const updatedAt = comment.updated_at ? new Date(comment.updated_at).getTime() : createdAt;
+    const isEdited = updatedAt > createdAt;
 
     const handleEditSubmit = async () => {
         if (editedContent.trim() === "") {
@@ -215,6 +218,7 @@ function CommentDisplay({ comment, postId }: { comment: Comment, postId: string 
     };
     
     const handleReportSubmit = async (data: z.infer<typeof reportSchema>) => {
+        if (!user) return;
         const result = await reportContentAction(comment.id, 'comment', data.reason, data.details);
         if (result.success) {
             toast({ title: "Report Submitted", description: "Thank you for your feedback." });
@@ -237,7 +241,7 @@ function CommentDisplay({ comment, postId }: { comment: Comment, postId: string 
             <div className="flex items-start gap-3">
                 <Avatar className="h-8 w-8 border">
                     <AvatarImage src={getAvatarUrl(comment.author_name || 'adventurer')} />
-                    <AvatarFallback>{comment.author_name.charAt(0)}</AvatarFallback>
+                    <AvatarFallback>{comment.author_name ? comment.author_name.charAt(0) : '?'}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
                     <div className="bg-muted p-3 rounded-lg">
@@ -332,9 +336,16 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
 
   const isPostAuthor = user?.id === post.author_id;
   const hasReported = user ? (post.reports || []).some(r => r.reporter_id === user.id) : false;
-  const isEdited = post.updated_at;
+
+  const createdAt = new Date(post.created_at).getTime();
+  const updatedAt = post.updated_at ? new Date(post.updated_at).getTime() : createdAt;
+  const isEdited = updatedAt > createdAt;
 
   const onSubmitComment = async (values: z.infer<typeof commentSchema>) => {
+    if (!user) {
+        toast({ title: "Please log in", description: "You must be logged in to comment.", variant: "destructive" });
+        return;
+    }
     const result = await addCommentAction(post.id, values.content);
     if(result.success) {
       commentForm.reset();
@@ -367,6 +378,7 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
   };
 
   const handleReportSubmit = async (data: z.infer<typeof reportSchema>) => {
+    if (!user) return;
     const result = await reportContentAction(post.id, 'post', data.reason, data.details);
     if (result.success) {
         toast({ title: "Report Submitted", description: "Thank you for your feedback." });
@@ -426,7 +438,7 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
         <CardHeader className="flex flex-row items-start gap-4">
           <Avatar className="h-12 w-12 border">
               <AvatarImage src={getAvatarUrl(post.author_name || 'adventurer')} />
-              <AvatarFallback>{post.author_name.charAt(0)}</AvatarFallback>
+              <AvatarFallback>{post.author_name ? post.author_name.charAt(0) : '?'}</AvatarFallback>
           </Avatar>
           <div className="flex-grow">
               <p className="font-semibold">{post.author_name}</p>
@@ -473,7 +485,7 @@ function PostDisplay({ post, groupId }: { post: Post, groupId: string }) {
           )}
         </CardHeader>
         <CardContent>
-            {post.shared_recipe && (
+            {post.shared_recipe && post.shared_recipe.id && (
                 <Link href={`/recipes/${post.shared_recipe.id}`} className="block mb-4 border rounded-lg hover:border-primary transition-colors">
                     <div className="flex gap-4 p-4">
                         <div className="relative w-24 h-24 rounded-md overflow-hidden flex-shrink-0">
@@ -633,6 +645,10 @@ export default function GroupDetailPage() {
   const isMember = user ? group.members.includes(user.id) : false;
   
   const onSubmitPost = async (values: z.infer<typeof postSchema>) => {
+      if (!user) {
+        toast({ title: "Please log in", description: "You must be logged in to create a post.", variant: "destructive" });
+        return;
+      }
       const result = await addPostAction(group.id, values.content);
       if(result.success) {
         form.reset();
@@ -649,6 +665,7 @@ export default function GroupDetailPage() {
   };
   
   const handleJoinGroup = async () => {
+    if (!user) return;
     const result = await joinGroupAction(group.id);
     if (!result.success) {
       toast({ title: "Error", description: result.error, variant: "destructive" });
@@ -656,6 +673,7 @@ export default function GroupDetailPage() {
   };
   
   const handleLeaveGroup = async () => {
+    if (!user) return;
     const result = await leaveGroupAction(group.id);
     if (!result.success) {
       toast({ title: "Error", description: result.error, variant: "destructive" });
