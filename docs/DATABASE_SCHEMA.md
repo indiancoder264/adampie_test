@@ -3,6 +3,8 @@
 
 This document outlines the database schema for the RecipeRadar application using PostgreSQL. The schema is designed to be normalized and includes tables for users, recipes, community interactions, and administrative functions. It incorporates best practices such as automatic timestamp updates and performance optimizations like denormalization for ratings.
 
+A complete, executable SQL script is available at `database/schema.sql`.
+
 ---
 
 ## Table of Contents
@@ -69,7 +71,7 @@ Stores information about registered users.
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL UNIQUE,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     is_admin BOOLEAN DEFAULT FALSE,
@@ -81,6 +83,9 @@ CREATE TABLE users (
     is_verified BOOLEAN DEFAULT FALSE,
     verification_otp CHAR(6),
     verification_otp_expires TIMESTAMPTZ,
+    -- Personalization & Gamification
+    read_history UUID[] DEFAULT ARRAY[]::UUID[],
+    achievements TEXT[] DEFAULT ARRAY[]::TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -89,6 +94,8 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 -- Index for finding users by verification OTP
 CREATE INDEX idx_users_verification_otp ON users(verification_otp);
+-- GIN index for efficiently querying the read_history array
+CREATE INDEX idx_users_read_history ON users USING GIN(read_history);
 
 
 -- Trigger to auto-update the 'updated_at' column
@@ -274,6 +281,7 @@ CREATE TABLE posts (
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
+    shared_recipe_id UUID REFERENCES recipes(id) ON DELETE SET NULL, -- For recipe sharing
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

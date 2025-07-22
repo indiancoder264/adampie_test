@@ -5,7 +5,7 @@ This document outlines the file and folder structure for the RecipeRadar applica
 
 ```
 /
-├── .env                  # Environment variables (DATABASE_URL, RESEND_API_KEY, etc.)
+├── .env                  # Environment variables (POSTGRES_URL, RESEND_API_KEY, etc.)
 ├── .vscode/
 │   └── settings.json     # VSCode editor settings
 ├── database/
@@ -82,5 +82,4 @@ This document outlines the file and folder structure for the RecipeRadar applica
         ├── recipes.tsx     # Recipes Context provider
         ├── users.tsx       # Users Context provider
         └── utils.ts        # Utility functions (e.g., cn for Tailwind classes)
-
 ```
