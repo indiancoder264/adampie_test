@@ -40,16 +40,6 @@ async function createSession(userId: string) {
 }
 
 /**
- * Updates the user session cookie with the latest data from the database.
- * This should be called after any action that modifies user data.
- */
-async function updateUserCookie(userId: string) {
-    // This function is now deprecated in favor of database-backed sessions.
-    // However, we might keep it for specific, non-auth related refreshes if needed,
-    // or remove it entirely. For now, it does nothing.
-}
-
-/**
  * Sanitizes a string to be safely included in HTML content.
  */
 function sanitizeHtml(text: string): string {
@@ -63,7 +53,7 @@ function sanitizeHtml(text: string): string {
 
 
 // --- Email Sending ---
-async function sendVerificationEmail(email: string, otp: string, subject: string, preamble: string) {
+async function sendEmail(email: string, subject: string, htmlContent: string) {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
       console.error("Resend API key is not configured.");
@@ -77,19 +67,11 @@ async function sendVerificationEmail(email: string, otp: string, subject: string
             from: 'RecipeRadar <onboarding@resend.dev>',
             to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com', // For testing
             subject: subject,
-            html: `
-                <div style="font-family: sans-serif; text-align: center; padding: 20px;">
-                    <h2>${sanitizeHtml(preamble)}</h2>
-                    <p>Your verification code is:</p>
-                    <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
-                    <p>This code will expire in 10 minutes.</p>
-                </div>
-            `,
+            html: htmlContent,
         });
-        console.log(`Verification email sent to ${email}`);
     } catch (error) {
-        console.error("Failed to send verification email:", error);
-        throw new Error("Could not send verification email.");
+        console.error("Failed to send email:", error);
+        throw new Error("Could not send email.");
     }
 }
 
@@ -151,7 +133,6 @@ export async function signupAction(data: {name: string, email: string, password:
   try {
     await client.query('BEGIN');
     
-    // Check if email already exists
     const existingEmail = await client.query(
         'SELECT id, is_verified, verification_emails_sent, last_verification_email_sent_at FROM users WHERE email = $1', 
         [email]
@@ -162,17 +143,13 @@ export async function signupAction(data: {name: string, email: string, password:
         const now = new Date();
         const lastSent = existingUser.last_verification_email_sent_at ? new Date(existingUser.last_verification_email_sent_at) : null;
         
-        // Check if user is already verified
         if (existingUser.is_verified) {
              return { success: false, error: "A user with this email already exists." };
         }
 
-        // Check rate limit for verification emails
         if (lastSent && lastSent.toDateString() === now.toDateString() && existingUser.verification_emails_sent >= 3) {
             return { success: false, error: "You have requested too many verification emails today. Please try again tomorrow." };
         }
-
-        // If not verified, and not rate-limited, allow re-sending verification by deleting the old unverified user record
         await client.query('DELETE FROM users WHERE id = $1', [existingUser.id]);
     }
 
@@ -182,8 +159,8 @@ export async function signupAction(data: {name: string, email: string, password:
     }
     
     const passwordHash = await bcrypt.hash(password, 10);
-    const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+    const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
     await client.query(
       `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, verification_otp, verification_otp_expires, verification_emails_sent, last_verification_email_sent_at)
@@ -191,12 +168,15 @@ export async function signupAction(data: {name: string, email: string, password:
       [name, sanitizeHtml(email), passwordHash, country, dietaryPreference, sanitizeHtml(name), verificationOtp, otpExpires]
     );
 
-    await sendVerificationEmail(
-        email, 
-        verificationOtp, 
-        `RecipeRadar Verification for ${email}`,
-        "Welcome to RecipeRadar!"
-    );
+    const emailHtml = `
+        <div style="font-family: sans-serif; text-align: center; padding: 20px;">
+            <h2>Welcome to RecipeRadar!</h2>
+            <p>Your verification code is:</p>
+            <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${verificationOtp}</p>
+            <p>This code will expire in 10 minutes.</p>
+        </div>
+    `;
+    await sendEmail(email, `RecipeRadar Verification for ${email}`, emailHtml);
     
     await client.query('COMMIT');
     revalidatePath("/admin");
@@ -245,6 +225,110 @@ export async function verifyOtpAction(email: string, otp: string) {
     }
 }
 
+export async function requestPasswordResetAction(email: string) {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const userRes = await client.query('SELECT * FROM users WHERE email = $1 AND is_verified = TRUE', [email]);
+        if (userRes.rows.length === 0) {
+            // Do not reveal if an email exists or not for security reasons
+            await client.query('COMMIT');
+            return { success: true };
+        }
+        const user = userRes.rows[0];
+
+        // Rate Limiting Logic
+        const now = new Date();
+        const lastRequest = user.last_password_reset_request_at ? new Date(user.last_password_reset_request_at) : null;
+        let requestsSent = user.password_reset_requests_sent;
+
+        if (lastRequest && lastRequest.toDateString() === now.toDateString()) {
+            if (requestsSent >= 3) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "You have requested too many password resets today. Please try again tomorrow." };
+            }
+        } else {
+            requestsSent = 0;
+        }
+
+        const token = randomUUID();
+        const tokenExpires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+
+        await client.query(
+            'UPDATE users SET password_reset_token = $1, password_reset_token_expires = $2, password_reset_requests_sent = $3, last_password_reset_request_at = NOW() WHERE id = $4',
+            [token, tokenExpires, requestsSent + 1, user.id]
+        );
+
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+        if (!baseUrl) {
+            await client.query('ROLLBACK');
+            console.error("NEXT_PUBLIC_BASE_URL is not set. Cannot send password reset email.");
+            return { success: false, error: "Server configuration error prevents sending reset email." };
+        }
+        const resetLink = `${baseUrl}/reset-password?token=${token}`;
+        
+        const emailHtml = `
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h2>Password Reset Request</h2>
+                <p>You requested a password reset for your RecipeRadar account. Click the link below to set a new password:</p>
+                <p><a href="${resetLink}" style="padding: 10px 15px; background-color: #FF7A45; color: white; text-decoration: none; border-radius: 5px;">Reset Your Password</a></p>
+                <p>This link will expire in 1 hour. If you did not request this, please ignore this email.</p>
+            </div>
+        `;
+        await sendEmail(user.email, 'Reset Your RecipeRadar Password', emailHtml);
+        
+        await client.query('COMMIT');
+        return { success: true };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error in requestPasswordResetAction:", error);
+        return { success: false, error: "An unexpected error occurred. Please try again." };
+    } finally {
+        client.release();
+    }
+}
+
+export async function resetPasswordAction(token: string, newPassword: string) {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const userRes = await client.query('SELECT * FROM users WHERE password_reset_token = $1', [token]);
+        if (userRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return { success: false, error: "This password reset link is invalid. It may have been used already." };
+        }
+        const user = userRes.rows[0];
+
+        if (new Date(user.password_reset_token_expires) < new Date()) {
+            await client.query('ROLLBACK');
+            return { success: false, error: "This password reset link has expired. Please request a new one." };
+        }
+
+        const newPasswordHash = await bcrypt.hash(newPassword, 10);
+        await client.query(
+            'UPDATE users SET password_hash = $1, password_reset_token = NULL, password_reset_token_expires = NULL WHERE id = $2',
+            [newPasswordHash, user.id]
+        );
+        
+        // Invalidate all active sessions for this user for security
+        await client.query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
+
+        await client.query('COMMIT');
+        return { success: true };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error in resetPasswordAction:", error);
+        return { success: false, error: "An unexpected error occurred while resetting your password." };
+    } finally {
+        client.release();
+    }
+}
 
 // --- Recipe Actions ---
 
@@ -913,7 +997,7 @@ export async function requestEmailChangeAction(newEmail: string) {
     const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
     if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
     const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
+    if (!user) return { success: false, error: "You must be logged in." };
   
     const client = await pool.connect();
     try {
@@ -921,14 +1005,12 @@ export async function requestEmailChangeAction(newEmail: string) {
         const dbUserRes = await client.query('SELECT * FROM users WHERE id = $1 FOR UPDATE', [user.id]);
         const dbUser = dbUserRes.rows[0];
 
-        // Check if the new email is already in use by another verified user
         const existingEmail = await client.query('SELECT id FROM users WHERE email = $1 AND is_verified = TRUE AND id != $2', [newEmail, user.id]);
         if (existingEmail.rows.length > 0) {
             await client.query('ROLLBACK');
             return { success: false, error: "This email address is already in use by another account." };
         }
 
-        // Rate Limiting Logic
         const now = new Date();
         const lastRequest = dbUser.last_new_email_request_at ? new Date(dbUser.last_new_email_request_at) : null;
         let requestsSent = dbUser.new_email_requests_sent;
@@ -939,24 +1021,26 @@ export async function requestEmailChangeAction(newEmail: string) {
                 return { success: false, error: "You have requested too many email changes today. Please try again tomorrow." };
             }
         } else {
-            // It's a new day, so reset the counter
             requestsSent = 0;
         }
 
         const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
         await client.query(
             'UPDATE users SET pending_new_email = $1, new_email_otp = $2, new_email_otp_expires = $3, new_email_requests_sent = $4, last_new_email_request_at = NOW() WHERE id = $5',
             [newEmail, verificationOtp, otpExpires, requestsSent + 1, user.id]
         );
         
-        await sendVerificationEmail(
-            newEmail, 
-            verificationOtp,
-            'Verify Your New RecipeRadar Email',
-            'You requested to change your email address on RecipeRadar.'
-        );
+        const emailHtml = `
+            <div style="font-family: sans-serif; text-align: center; padding: 20px;">
+                <h2>You requested to change your email address on RecipeRadar.</h2>
+                <p>Your verification code is:</p>
+                <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${verificationOtp}</p>
+                <p>This code will expire in 10 minutes.</p>
+            </div>
+        `;
+        await sendEmail(newEmail, 'Verify Your New RecipeRadar Email', emailHtml);
         
         await client.query('COMMIT');
         return { success: true };
@@ -1070,7 +1154,6 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
         if (dbUserRes.rows.length === 0) return { success: false, error: "User not found." };
         const dbUser = dbUserRes.rows[0];
 
-        // Rate Limiting Checks
         const now = new Date();
         const lastAttempt = dbUser.last_password_attempt_at ? new Date(dbUser.last_password_attempt_at) : null;
         if (lastAttempt && lastAttempt.toDateString() === now.toDateString()) {
@@ -1078,7 +1161,6 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
                 return { success: false, error: "You have exceeded the maximum password change attempts for today." };
             }
         } else {
-            // Reset attempts if it's a new day
             await client.query('UPDATE users SET password_change_attempts = 0 WHERE id = $1', [user.id]);
             dbUser.password_change_attempts = 0;
         }
@@ -1092,7 +1174,6 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             return { success: false, error: `Incorrect password. You have ${2 - dbUser.password_change_attempts} attempts remaining today.` };
         }
         
-        // Prevent user from setting the same password
         const isNewPasswordSame = await bcrypt.compare(data.newPassword, dbUser.password_hash);
         if (isNewPasswordSame) {
             return { success: false, error: "Your new password cannot be the same as your old password."};
@@ -1104,7 +1185,6 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             [newPasswordHash, user.id]
         );
 
-        // Log out all other sessions
         await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [user.id, sessionToken]);
 
         revalidatePath('/profile');
@@ -1171,7 +1251,6 @@ export async function toggleFavoriteAction(recipeId: string) {
             await client.query('DELETE FROM user_favorites WHERE user_id = $1 AND recipe_id = $2', [user.id, recipeId]);
         } else {
             await client.query('INSERT INTO user_favorites (user_id, recipe_id) VALUES ($1, $2)', [user.id, recipeId]);
-            // Gamification: Unlock "First Favorite" achievement
             if (!user.achievements.includes('first_favorite')) {
                 await client.query(`UPDATE users SET achievements = array_append(achievements, 'first_favorite') WHERE id = $1`, [user.id]);
             }
@@ -1201,19 +1280,15 @@ export async function logRecipeViewAction(recipeId: string) {
     const userId = sessionRes.rows[0].user_id;
 
     try {
-        // Use a SQL query to add the recipe ID to the history array, avoiding duplicates.
         await pool.query(
             `UPDATE users 
              SET read_history = read_history || $1::uuid 
              WHERE id = $2 AND NOT (read_history @> ARRAY[$1::uuid])`,
             [recipeId, userId]
         );
-        // No need to revalidate paths for this silent action
         return { success: true };
     } catch (error) {
         console.error("Error logging recipe view:", error);
         return { success: false };
     }
 }
-
-    

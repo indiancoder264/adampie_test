@@ -40,8 +40,6 @@ export default function LoginPage() {
         title: "Logged In!",
         description: `Welcome back!`,
       });
-      // A full page refresh is needed to securely read the httpOnly cookie
-      // Redirect to admin page if user is admin, otherwise home
       router.push(result.isAdmin ? "/admin" : "/");
       router.refresh(); 
     } else {
@@ -81,7 +79,7 @@ export default function LoginPage() {
                   <FormItem>
                     <div className="flex justify-between items-end">
                       <Label htmlFor="password">Password</Label>
-                      <Link href="/forgot-password" passHref className="text-sm text-muted-foreground hover:text-primary underline">
+                      <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-primary underline">
                         Forgot Password?
                       </Link>
                     </div>
