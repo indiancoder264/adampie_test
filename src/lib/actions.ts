@@ -1,4 +1,5 @@
 
+
 "use server";
 
 import { cookies } from "next/headers";
@@ -65,8 +66,8 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
     try {
         await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
-            // The line below is temporarily hardcoded for development without a custom domain.
-            to:  process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
+            // The line below is a temporary workaround for development.
+            to: 'bobby.ch6969@gmail.com',
             // TODO: When a custom domain is configured with Resend, replace the line above with the one below.
             // to: email,
             subject: subject,
@@ -136,40 +137,68 @@ export async function signupAction(data: {name: string, email: string, password:
   try {
     await client.query('BEGIN');
     
-    const existingEmail = await client.query(
+    const existingEmailRes = await client.query(
         'SELECT id, is_verified, verification_emails_sent, last_verification_email_sent_at FROM users WHERE email = $1', 
         [email]
     );
 
-    if (existingEmail.rows.length > 0) {
-        const existingUser = existingEmail.rows[0];
+    let userId;
+    const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
+
+    if (existingEmailRes.rows.length > 0) {
+        const existingUser = existingEmailRes.rows[0];
+        userId = existingUser.id;
+
+        if (existingUser.is_verified) {
+            await client.query('ROLLBACK');
+            return { success: false, error: "A user with this email already exists." };
+        }
+
+        // Rate limiting logic
         const now = new Date();
         const lastSent = existingUser.last_verification_email_sent_at ? new Date(existingUser.last_verification_email_sent_at) : null;
+        let emailsSent = existingUser.verification_emails_sent;
         
-        if (existingUser.is_verified) {
-             return { success: false, error: "A user with this email already exists." };
+        // Check if the last request was within the 6-hour window
+        if (lastSent && (now.getTime() - lastSent.getTime()) < 6 * 60 * 60 * 1000) {
+            if (emailsSent >= 3) {
+                await client.query('ROLLBACK');
+                return { success: false, error: "You have requested too many verification codes. Please try again later." };
+            }
+            emailsSent += 1;
+        } else {
+            // It's been more than 6 hours, so reset the counter
+            emailsSent = 1;
         }
 
-        if (lastSent && lastSent.toDateString() === now.toDateString() && existingUser.verification_emails_sent >= 3) {
-            return { success: false, error: "You have requested too many verification emails today. Please try again tomorrow." };
+        // Update the existing unverified user record with new details and OTP
+        const passwordHash = await bcrypt.hash(password, 10);
+        await client.query(
+            `UPDATE users 
+             SET name = $1, password_hash = $2, country = $3, dietary_preference = $4, avatar_seed = $5, 
+                 verification_otp = $6, verification_otp_expires = $7, 
+                 verification_emails_sent = $8, last_verification_email_sent_at = NOW()
+             WHERE id = $9`,
+            [name, passwordHash, country, dietaryPreference, sanitizeHtml(name), verificationOtp, otpExpires, emailsSent, userId]
+        );
+
+    } else {
+        // No existing user, create a new one
+        const existingName = await client.query('SELECT id FROM users WHERE name ILIKE $1', [name]);
+        if (existingName.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return { success: false, error: "This name is already taken. Please choose another." };
         }
-        await client.query('DELETE FROM users WHERE id = $1', [existingUser.id]);
+        
+        const passwordHash = await bcrypt.hash(password, 10);
+        const newUserRes = await client.query(
+          `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, verification_otp, verification_otp_expires, verification_emails_sent, last_verification_email_sent_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW()) RETURNING id`,
+          [name, sanitizeHtml(email), passwordHash, country, dietaryPreference, sanitizeHtml(name), verificationOtp, otpExpires]
+        );
+        userId = newUserRes.rows[0].id;
     }
-
-    const existingName = await client.query('SELECT id FROM users WHERE name ILIKE $1', [name]);
-    if (existingName.rows.length > 0) {
-      return { success: false, error: "This name is already taken. Please choose another." };
-    }
-    
-    const passwordHash = await bcrypt.hash(password, 10);
-    const verificationOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-
-    await client.query(
-      `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, verification_otp, verification_otp_expires, verification_emails_sent, last_verification_email_sent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())`,
-      [name, sanitizeHtml(email), passwordHash, country, dietaryPreference, sanitizeHtml(name), verificationOtp, otpExpires]
-    );
 
     const emailHtml = `
         <div style="font-family: sans-serif; text-align: center; padding: 20px;">
