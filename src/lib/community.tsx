@@ -85,7 +85,11 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
                 // Look up the creator's name from the existing user list.
                 creator_name: creator?.name || 'Unknown User',
             };
-          return [...currentGroups, groupToAdd];
+            // Avoid adding duplicates
+            if (currentGroups.some(g => g.id === groupToAdd.id)) {
+                return currentGroups;
+            }
+            return [...currentGroups, groupToAdd];
         }
         if (eventType === 'UPDATE') {
           return currentGroups.map(group => {

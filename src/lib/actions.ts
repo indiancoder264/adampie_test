@@ -68,7 +68,7 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
             from: 'RecipeRadar <onboarding@resend.dev>',
             // The line below is a temporary workaround for development.
             // When a custom domain is configured with Resend, replace it with the commented-out line below.
-            to:process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
+            to: 'Bobby.ch6969@gmail.com',
             // to: email,
             subject: subject,
             html: htmlContent,
@@ -598,13 +598,21 @@ export async function deleteGroupAction(groupId: string) {
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    const client = await pool.connect();
+    const sessionRes = await client.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
     if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
     const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
+    if (!user) return { success: false, error: "Unauthorized" };
   
-    const client = await pool.connect();
     try {
+        const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
+        if (groupRes.rows.length === 0) return { success: false, error: "Group not found." };
+        
+        const isCreator = groupRes.rows[0].creator_id === user.id;
+        if (!user.isAdmin && !isCreator) {
+            return { success: false, error: "Unauthorized. You are not the creator or an admin." };
+        }
+
         await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
         revalidatePath('/community', 'layout');
         return { success: true };
