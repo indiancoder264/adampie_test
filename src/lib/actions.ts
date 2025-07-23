@@ -30,7 +30,7 @@ async function createSession(userId: string) {
         [sessionToken, userId, expiresAt]
     );
 
-    cookies().set("session_token", sessionToken, {
+    (await cookies()).set("session_token", sessionToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         expires: expiresAt,
@@ -134,12 +134,13 @@ export async function loginAction(data: { email: string; password: string;}) {
 }
 
 export async function logoutAction() {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (sessionToken) {
         const pool = getPool();
         await pool.query('DELETE FROM sessions WHERE id = $1', [sessionToken]);
     }
-    cookies().delete("session_token");
+    cookieStore.delete("session_token");
     revalidatePath("/", "layout");
 }
 
@@ -277,7 +278,8 @@ function parseIngredient(ingredientString: string): { quantity: string, name: st
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -375,7 +377,8 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 }
 
 export async function deleteRecipeAction(recipeId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -399,7 +402,8 @@ export async function deleteRecipeAction(recipeId: string) {
 }
 
 export async function togglePublishAction(recipeId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -424,7 +428,8 @@ export async function togglePublishAction(recipeId: string) {
 }
 
 export async function deleteTipAction(recipeId: string, tipId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -478,7 +483,8 @@ export async function createGroupAction(data: { name: string; description: strin
 }
 
 export async function deleteGroupAction(groupId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -501,7 +507,8 @@ export async function deleteGroupAction(groupId: string) {
 }
 
 export async function editGroupAction(groupId: string, data: { name: string, description: string }) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -527,7 +534,8 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 
 // --- Community Content Actions ---
 export async function addPostAction(groupId: string, content: string, recipeId?: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -553,7 +561,8 @@ export async function addPostAction(groupId: string, content: string, recipeId?:
 }
 
 export async function editPostAction(postId: string, content: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -578,7 +587,8 @@ export async function editPostAction(postId: string, content: string) {
 }
 
 export async function deletePostAction(postId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -605,7 +615,8 @@ export async function deletePostAction(postId: string) {
 }
 
 export async function addCommentAction(postId: string, content: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -630,7 +641,8 @@ export async function addCommentAction(postId: string, content: string) {
 }
 
 export async function editCommentAction(commentId: string, content: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -655,7 +667,8 @@ export async function editCommentAction(commentId: string, content: string) {
 }
 
 export async function deleteCommentAction(commentId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -681,7 +694,8 @@ export async function deleteCommentAction(commentId: string) {
 }
 
 export async function togglePostReactionAction(postId: string, reaction: 'like' | 'dislike') {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -718,7 +732,8 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
 }
 
 export async function reportContentAction(contentId: string, contentType: 'post' | 'comment', reason: string, details?: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -742,7 +757,8 @@ export async function reportContentAction(contentId: string, contentType: 'post'
 }
 
 export async function dismissReportAction(contentId: string, contentType: 'post' | 'comment') {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -767,7 +783,8 @@ export async function dismissReportAction(contentId: string, contentType: 'post'
 
 // --- User Actions ---
 export async function deleteUserAction(userId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -790,7 +807,8 @@ export async function deleteUserAction(userId: string) {
 }
 
 export async function suspendUserAction(userId: string, days: number) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -813,7 +831,8 @@ export async function suspendUserAction(userId: string, days: number) {
 }
 
 export async function unsuspendUserAction(userId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -836,7 +855,8 @@ export async function unsuspendUserAction(userId: string) {
 }
 
 export async function joinGroupAction(groupId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -860,7 +880,8 @@ export async function joinGroupAction(groupId: string) {
 }
 
 export async function leaveGroupAction(groupId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -884,7 +905,8 @@ export async function leaveGroupAction(groupId: string) {
 }
 
 export async function requestEmailChangeAction(newEmail: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -949,7 +971,8 @@ export async function requestEmailChangeAction(newEmail: string) {
 
 
 export async function updateUserAction(data: Partial<Pick<User, 'name' | 'country' | 'dietaryPreference'>>, otp?: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -1031,7 +1054,8 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
 }
 
 export async function changePasswordAction(data: {currentPassword: string, newPassword: string}) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -1094,7 +1118,8 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
 }
 
 export async function updateFavoriteCuisinesAction(cuisines: string[]) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -1127,7 +1152,8 @@ export async function updateFavoriteCuisinesAction(cuisines: string[]) {
 }
 
 export async function toggleFavoriteAction(recipeId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false, isFavorite: false, error: "Unauthorized" };
     
     const pool = getPool();
@@ -1165,7 +1191,8 @@ export async function toggleFavoriteAction(recipeId: string) {
 }
 
 export async function logRecipeViewAction(recipeId: string) {
-    const sessionToken = cookies().get("session_token")?.value;
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
     if (!sessionToken) return { success: false };
     
     const pool = getPool();
@@ -1189,4 +1216,3 @@ export async function logRecipeViewAction(recipeId: string) {
     }
 }
 
-    
