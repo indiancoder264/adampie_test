@@ -5,9 +5,10 @@ import { Header } from '@/components/layout/header';
 import { Footer } from '@/components/layout/footer';
 import { Toaster } from '@/components/ui/toaster';
 import './globals.css';
-import { fetchUsers, fetchRecipes, fetchGroups } from '@/lib/data';
+import { fetchUsers, fetchRecipes, fetchGroups, fetchUserById } from '@/lib/data';
 import { cookies } from 'next/headers';
 import type { User } from '@/lib/auth';
+import getPool from '@/lib/db';
 
 export const metadata: Metadata = {
   title: 'RecipeRadar',
@@ -19,14 +20,30 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Read user from cookie on the server to ensure auth state is fresh
-  const cookieStore = await cookies();
-  const userCookie = cookieStore.get('user');
+  // Read session token from cookie
+  const sessionToken = cookies().get('session_token')?.value;
   let currentUser: User | null = null;
-  if (userCookie) {
+  
+  if (sessionToken) {
     try {
-      currentUser = JSON.parse(userCookie.value);
-    } catch {
+      const pool = getPool();
+      // Validate session against the database
+      const sessionResult = await pool.query(
+        'SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', 
+        [sessionToken]
+      );
+      
+      if (sessionResult.rows.length > 0) {
+        const userId = sessionResult.rows[0].user_id;
+        // Fetch the full user object if the session is valid
+        currentUser = await fetchUserById(userId);
+      } else {
+         // If session is invalid or expired, delete the cookie
+         cookies().delete('session_token');
+      }
+
+    } catch(error) {
+      console.error("Error validating session:", error);
       currentUser = null;
     }
   }

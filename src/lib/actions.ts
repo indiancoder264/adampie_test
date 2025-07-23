@@ -12,25 +12,53 @@ import type { Post, Comment, Report } from "./community";
 import { Resend } from 'resend';
 import { redirect } from "next/navigation";
 import { fetchUserById } from "./data";
+import { randomUUID } from "crypto";
 
 
 // --- Helper Functions ---
+
+/**
+ * Creates a new session for a user and sets the session cookie.
+ */
+async function createSession(userId: string) {
+    const pool = getPool();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+    const sessionToken = randomUUID();
+
+    await pool.query(
+        'INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)',
+        [sessionToken, userId, expiresAt]
+    );
+
+    cookies().set("session_token", sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        expires: expiresAt,
+        sameSite: 'lax',
+        path: '/',
+    });
+}
 
 /**
  * Updates the user session cookie with the latest data from the database.
  * This should be called after any action that modifies user data.
  */
 async function updateUserCookie(userId: string) {
-    const user = await fetchUserById(userId);
-    if (user) {
-        const cookieStore = await cookies();
-        cookieStore.set("user", JSON.stringify(user), {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            maxAge: 60 * 60 * 24 * 7, // 1 week
-            path: '/',
-        });
-    }
+    // This function is now deprecated in favor of database-backed sessions.
+    // However, we might keep it for specific, non-auth related refreshes if needed,
+    // or remove it entirely. For now, it does nothing.
+}
+
+/**
+ * Sanitizes a string to be safely included in HTML content.
+ */
+function sanitizeHtml(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
 }
 
 
@@ -51,7 +79,7 @@ async function sendVerificationEmail(email: string, otp: string, subject: string
             subject: subject,
             html: `
                 <div style="font-family: sans-serif; text-align: center; padding: 20px;">
-                    <h2>${preamble}</h2>
+                    <h2>${sanitizeHtml(preamble)}</h2>
                     <p>Your verification code is:</p>
                     <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
                     <p>This code will expire in 10 minutes.</p>
@@ -69,47 +97,7 @@ async function sendVerificationEmail(email: string, otp: string, subject: string
 // --- Auth Actions ---
 export async function loginAction(data: { email: string; password: string;}) {
     const { email, password } = data;
-
-    // Handle Admin Login from environment variables
-    const adminEmail = process.env.ADMIN_EMAIL;
-    const adminPassword = process.env.ADMIN_PASSWORD;
-
-    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
-        const pool = getPool();
-        const client = await pool.connect();
-        try {
-            // Find or create the admin user in the database
-            let result = await client.query('SELECT id FROM users WHERE email = $1', [adminEmail]);
-            let adminUserId;
-
-            if (result.rows.length === 0) {
-                // If admin user doesn't exist, create one
-                const passwordHash = await bcrypt.hash(adminPassword, 10);
-                const insertResult = await client.query(
-                    `INSERT INTO users (name, email, password_hash, is_admin, is_verified, avatar_seed, country, dietary_preference)
-                     VALUES ($1, $2, $3, TRUE, TRUE, $4, 'USA', 'All') RETURNING id`,
-                    ['Admin', adminEmail, passwordHash, 'Admin']
-                );
-                adminUserId = insertResult.rows[0].id;
-            } else {
-                adminUserId = result.rows[0].id;
-            }
-
-            if (adminUserId) {
-                await updateUserCookie(adminUserId);
-                return { success: true, isAdmin: true };
-            } else {
-                 return { success: false, error: "Failed to create or find admin account." };
-            }
-        } catch (error) {
-            console.error("Admin login error:", error);
-            return { success: false, error: "An unexpected admin error occurred." };
-        } finally {
-            client.release();
-        }
-    }
     
-    // Handle Regular User Login
     const pool = getPool();
     const client = await pool.connect();
     try {
@@ -133,7 +121,7 @@ export async function loginAction(data: { email: string; password: string;}) {
              return { success: false, error: `Your account is suspended until ${new Date(user.suspended_until).toLocaleDateString()}.` };
         }
 
-        await updateUserCookie(user.id);
+        await createSession(user.id);
         
         return { success: true, isAdmin: user.is_admin };
 
@@ -146,8 +134,12 @@ export async function loginAction(data: { email: string; password: string;}) {
 }
 
 export async function logoutAction() {
-    const cookieStore = await cookies();
-    cookieStore.delete("user");
+    const sessionToken = cookies().get("session_token")?.value;
+    if (sessionToken) {
+        const pool = getPool();
+        await pool.query('DELETE FROM sessions WHERE id = $1', [sessionToken]);
+    }
+    cookies().delete("session_token");
     revalidatePath("/", "layout");
 }
 
@@ -195,7 +187,7 @@ export async function signupAction(data: {name: string, email: string, password:
     await client.query(
       `INSERT INTO users (name, email, password_hash, country, dietary_preference, avatar_seed, verification_otp, verification_otp_expires, verification_emails_sent, last_verification_email_sent_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())`,
-      [name, email, passwordHash, country, dietaryPreference, name, verificationOtp, otpExpires]
+      [name, sanitizeHtml(email), passwordHash, country, dietaryPreference, sanitizeHtml(name), verificationOtp, otpExpires]
     );
 
     await sendVerificationEmail(
@@ -285,10 +277,13 @@ function parseIngredient(ingredientString: string): { quantity: string, name: st
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
 
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
@@ -302,7 +297,6 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         dietary_type, meal_category, consumption_time, dietary_notes, ingredients, steps
     } = validation.data;
     
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -367,10 +361,6 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 
         const newTipData = tipResult.rows[0];
 
-        if (achievementToUnlock) {
-            await updateUserCookie(user.id);
-        }
-
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath(`/admin`);
         revalidatePath(`/profile`);
@@ -385,13 +375,15 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 }
 
 export async function deleteRecipeAction(recipeId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM recipes WHERE id = $1', [recipeId]);
@@ -407,13 +399,15 @@ export async function deleteRecipeAction(recipeId: string) {
 }
 
 export async function togglePublishAction(recipeId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('UPDATE recipes SET published = NOT published WHERE id = $1', [recipeId]);
@@ -430,13 +424,15 @@ export async function togglePublishAction(recipeId: string) {
 }
 
 export async function deleteTipAction(recipeId: string, tipId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM tips WHERE id = $1', [tipId]);
@@ -466,7 +462,6 @@ export async function createGroupAction(data: { name: string; description: strin
         // Gamification: Unlock "Community Starter" achievement
         if (!user.achievements.includes('community_starter')) {
              await client.query(`UPDATE users SET achievements = array_append(achievements, 'community_starter') WHERE id = $1`, [user.id]);
-             await updateUserCookie(user.id);
         }
 
         await client.query('COMMIT');
@@ -483,13 +478,15 @@ export async function createGroupAction(data: { name: string; description: strin
 }
 
 export async function deleteGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
@@ -504,13 +501,15 @@ export async function deleteGroupAction(groupId: string) {
 }
 
 export async function editGroupAction(groupId: string, data: { name: string, description: string }) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
@@ -528,12 +527,15 @@ export async function editGroupAction(groupId: string, data: { name: string, des
 
 // --- Community Content Actions ---
 export async function addPostAction(groupId: string, content: string, recipeId?: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
+    
     const client = await pool.connect();
     try {
         await client.query(
@@ -551,13 +553,15 @@ export async function addPostAction(groupId: string, content: string, recipeId?:
 }
 
 export async function editPostAction(postId: string, content: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         const postRes = await client.query('SELECT author_id, group_id FROM posts WHERE id = $1', [postId]);
@@ -574,13 +578,15 @@ export async function editPostAction(postId: string, content: string) {
 }
 
 export async function deletePostAction(postId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         const postRes = await client.query('SELECT author_id, group_id FROM posts WHERE id = $1', [postId]);
@@ -599,12 +605,15 @@ export async function deletePostAction(postId: string) {
 }
 
 export async function addCommentAction(postId: string, content: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
+
     const client = await pool.connect();
     try {
         const postRes = await client.query('SELECT group_id FROM posts WHERE id = $1', [postId]);
@@ -621,12 +630,15 @@ export async function addCommentAction(postId: string, content: string) {
 }
 
 export async function editCommentAction(commentId: string, content: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "Unauthorized" };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
+
     const client = await pool.connect();
     try {
         const commentRes = await client.query('SELECT c.author_id, p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [commentId]);
@@ -643,12 +655,14 @@ export async function editCommentAction(commentId: string, content: string) {
 }
 
 export async function deleteCommentAction(commentId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "Unauthorized" };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
     const client = await pool.connect();
     try {
         const commentRes = await client.query('SELECT c.author_id, p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [commentId]);
@@ -667,12 +681,14 @@ export async function deleteCommentAction(commentId: string) {
 }
 
 export async function togglePostReactionAction(postId: string, reaction: 'like' | 'dislike') {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -702,12 +718,14 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
 }
 
 export async function reportContentAction(contentId: string, contentType: 'post' | 'comment', reason: string, details?: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
     const client = await pool.connect();
     try {
         const postRes = await client.query(contentType === 'post' ? 'SELECT group_id FROM posts WHERE id = $1' : 'SELECT p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [contentId]);
@@ -724,13 +742,15 @@ export async function reportContentAction(contentId: string, contentType: 'post'
 }
 
 export async function dismissReportAction(contentId: string, contentType: 'post' | 'comment') {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('UPDATE reports SET is_dismissed = TRUE WHERE content_id = $1 AND content_type = $2', [contentId, contentType]);
@@ -747,13 +767,15 @@ export async function dismissReportAction(contentId: string, contentType: 'post'
 
 // --- User Actions ---
 export async function deleteUserAction(userId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
   
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM users WHERE id = $1', [userId]);
@@ -768,13 +790,15 @@ export async function deleteUserAction(userId: string) {
 }
 
 export async function suspendUserAction(userId: string, days: number) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
     if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
 
-    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('UPDATE users SET suspended_until = NOW() + ($1 * INTERVAL \'1 day\') WHERE id = $2', [days, userId]);
@@ -789,13 +813,15 @@ export async function suspendUserAction(userId: string, days: number) {
 }
 
 export async function unsuspendUserAction(userId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
+    
     const client = await pool.connect();
     try {
         await client.query('UPDATE users SET suspended_until = NULL WHERE id = $1', [userId]);
@@ -810,13 +836,15 @@ export async function unsuspendUserAction(userId: string) {
 }
 
 export async function joinGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
+    
     const client = await pool.connect();
     try {
         await client.query('INSERT INTO group_members (user_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [user.id, groupId]);
@@ -832,13 +860,15 @@ export async function joinGroupAction(groupId: string) {
 }
 
 export async function leaveGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    let user: User | null = null;
-    const userCookie = cookieStore.get("user");
-    if (userCookie) user = JSON.parse(userCookie.value);
-    if (!user) return { success: false, error: "You must be logged in." };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
     
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "You must be logged in." };
+    
     const client = await pool.connect();
     try {
         await client.query('DELETE FROM group_members WHERE user_id = $1 AND group_id = $2', [user.id, groupId]);
@@ -854,12 +884,15 @@ export async function leaveGroupAction(groupId: string) {
 }
 
 export async function requestEmailChangeAction(newEmail: string) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false, error: "Unauthorized" };
-    let user: User = JSON.parse(userCookie.value);
-  
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
+  
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -904,7 +937,6 @@ export async function requestEmailChangeAction(newEmail: string) {
         );
         
         await client.query('COMMIT');
-        await updateUserCookie(user.id);
         return { success: true };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -917,14 +949,16 @@ export async function requestEmailChangeAction(newEmail: string) {
 
 
 export async function updateUserAction(data: Partial<Pick<User, 'name' | 'country' | 'dietaryPreference'>>, otp?: string) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false, error: "Unauthorized" };
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
     
-    let user: User = JSON.parse(userCookie.value);
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
+    
     const client = await pool.connect();
-
     try {
         await client.query('BEGIN');
         const updates = [];
@@ -980,12 +1014,12 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
             const queryText = `UPDATE users SET ${updates.join(', ')} WHERE id = $${valueIndex} RETURNING *`;
             await client.query(queryText, values);
             await client.query('COMMIT');
-            await updateUserCookie(user.id);
         } else {
             await client.query('ROLLBACK');
         }
 
         revalidatePath('/profile');
+        revalidatePath('/', 'layout');
         return { success: true };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -997,12 +1031,15 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
 }
 
 export async function changePasswordAction(data: {currentPassword: string, newPassword: string}) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false, error: "Unauthorized" };
-    let user: User = JSON.parse(userCookie.value);
-
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
+
     const client = await pool.connect();
     try {
         const dbUserRes = await client.query('SELECT * FROM users WHERE id = $1', [user.id]);
@@ -1028,7 +1065,6 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
                 'UPDATE users SET password_change_attempts = password_change_attempts + 1, last_password_attempt_at = NOW() WHERE id = $1',
                 [user.id]
             );
-            await updateUserCookie(user.id);
             return { success: false, error: `Incorrect password. You have ${2 - dbUser.password_change_attempts} attempts remaining today.` };
         }
         
@@ -1044,7 +1080,9 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             [newPasswordHash, user.id]
         );
 
-        await updateUserCookie(user.id);
+        // Log out all other sessions
+        await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [user.id, sessionToken]);
+
         revalidatePath('/profile');
         return { success: true };
     } catch (error) {
@@ -1056,12 +1094,15 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
 }
 
 export async function updateFavoriteCuisinesAction(cuisines: string[]) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false, error: "Unauthorized" };
-    let user: User = JSON.parse(userCookie.value);
-
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, error: "Unauthorized" };
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1073,8 +1114,8 @@ export async function updateFavoriteCuisinesAction(cuisines: string[]) {
             await client.query(queryText, queryValues);
         }
         await client.query('COMMIT');
-        await updateUserCookie(user.id);
         revalidatePath('/profile');
+        revalidatePath('/', 'layout');
         return { success: true };
     } catch (error) {
         await client.query('ROLLBACK');
@@ -1086,11 +1127,15 @@ export async function updateFavoriteCuisinesAction(cuisines: string[]) {
 }
 
 export async function toggleFavoriteAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false, isFavorite: false, error: "Unauthorized" };
-    let user: User = JSON.parse(userCookie.value);
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false, isFavorite: false, error: "Unauthorized" };
+    
     const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false, isFavorite: false, error: "Unauthorized" };
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) return { success: false, isFavorite: false, error: "Unauthorized" };
+
     const client = await pool.connect();
     let isCurrentlyFavorite = user.favorites.includes(recipeId);
 
@@ -1106,7 +1151,6 @@ export async function toggleFavoriteAction(recipeId: string) {
             }
         }
         await client.query('COMMIT');
-        await updateUserCookie(user.id);
         revalidatePath(`/recipes/${recipeId}`);
         revalidatePath('/profile');
         revalidatePath('/');
@@ -1121,20 +1165,21 @@ export async function toggleFavoriteAction(recipeId: string) {
 }
 
 export async function logRecipeViewAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const userCookie = cookieStore.get("user");
-    if (!userCookie) return { success: false }; // Fail silently if not logged in
+    const sessionToken = cookies().get("session_token")?.value;
+    if (!sessionToken) return { success: false };
     
-    let user: User = JSON.parse(userCookie.value);
     const pool = getPool();
-    
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if(sessionRes.rows.length === 0) return { success: false };
+    const userId = sessionRes.rows[0].user_id;
+
     try {
         // Use a SQL query to add the recipe ID to the history array, avoiding duplicates.
         await pool.query(
             `UPDATE users 
              SET read_history = read_history || $1::uuid 
              WHERE id = $2 AND NOT (read_history @> ARRAY[$1::uuid])`,
-            [recipeId, user.id]
+            [recipeId, userId]
         );
         // No need to revalidate paths for this silent action
         return { success: true };
@@ -1143,3 +1188,5 @@ export async function logRecipeViewAction(recipeId: string) {
         return { success: false };
     }
 }
+
+    
