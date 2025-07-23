@@ -67,8 +67,8 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
         await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
             // The line below is a temporary workaround for development.
-            to: 'bobby.ch6969@gmail.com',
-            // TODO: When a custom domain is configured with Resend, replace the line above with the one below.
+            // When a custom domain is configured with Resend, replace it with the commented-out line below.
+            to: 'Bobby.ch6969@gmail.com',
             // to: email,
             subject: subject,
             html: htmlContent,
@@ -1176,6 +1176,7 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
 
     const client = await pool.connect();
     try {
+        await client.query('BEGIN');
         const dbUserRes = await client.query('SELECT * FROM users WHERE id = $1', [user.id]);
         if (dbUserRes.rows.length === 0) return { success: false, error: "User not found." };
         const dbUser = dbUserRes.rows[0];
@@ -1184,6 +1185,7 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
         const lastAttempt = dbUser.last_password_attempt_at ? new Date(dbUser.last_password_attempt_at) : null;
         if (lastAttempt && lastAttempt.toDateString() === now.toDateString()) {
             if (dbUser.password_change_attempts >= 3) {
+                await client.query('ROLLBACK');
                 return { success: false, error: "You have exceeded the maximum password change attempts for today." };
             }
         } else {
@@ -1197,11 +1199,13 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
                 'UPDATE users SET password_change_attempts = password_change_attempts + 1, last_password_attempt_at = NOW() WHERE id = $1',
                 [user.id]
             );
+            await client.query('COMMIT');
             return { success: false, error: `Incorrect password. You have ${2 - dbUser.password_change_attempts} attempts remaining today.` };
         }
         
         const isNewPasswordSame = await bcrypt.compare(data.newPassword, dbUser.password_hash);
         if (isNewPasswordSame) {
+            await client.query('ROLLBACK');
             return { success: false, error: "Your new password cannot be the same as your old password."};
         }
 
@@ -1211,11 +1215,18 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             [newPasswordHash, user.id]
         );
 
-        await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [user.id, sessionToken]);
+        // Invalidate all sessions for this user for security
+        await client.query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
+        
+        await client.query('COMMIT');
+        
+        // Create a new session for the current device
+        await createSession(user.id);
 
         revalidatePath('/profile');
         return { success: true };
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error(error);
         return { success: false, error: "An unexpected error occurred." };
     } finally {
