@@ -2,7 +2,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -13,40 +12,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
-import { loginAction } from "@/lib/actions";
+import { requestPasswordResetAction } from "@/lib/actions";
 
-const loginSchema = z.object({
+const forgotPasswordSchema = z.object({
   email: z.string().email("Please enter a valid email address."),
-  password: z.string().min(1, "Password cannot be empty."),
 });
 
-export default function LoginPage() {
-  const router = useRouter();
+export default function ForgotPasswordPage() {
   const { toast } = useToast();
 
-  const form = useForm<z.infer<typeof loginSchema>>({
-    resolver: zodResolver(loginSchema),
+  const form = useForm<z.infer<typeof forgotPasswordSchema>>({
+    resolver: zodResolver(forgotPasswordSchema),
     defaultValues: {
       email: "",
-      password: "",
     },
   });
 
-  const onSubmit = async (values: z.infer<typeof loginSchema>) => {
-    const result = await loginAction(values);
+  const onSubmit = async (values: z.infer<typeof forgotPasswordSchema>) => {
+    const result = await requestPasswordResetAction(values.email);
 
     if (result.success) {
       toast({
-        title: "Logged In!",
-        description: `Welcome back!`,
+        title: "Check Your Email",
+        description: "If an account with that email exists, we've sent instructions to reset your password.",
       });
-      // A full page refresh is needed to securely read the httpOnly cookie
-      // Redirect to admin page if user is admin, otherwise home
-      router.push(result.isAdmin ? "/admin" : "/");
-      router.refresh(); 
+      form.reset();
     } else {
       toast({
-        title: "Login Failed",
+        title: "Error",
         description: result.error,
         variant: "destructive",
       });
@@ -57,8 +50,8 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-[calc(100vh-14rem)] py-12 px-4">
       <Card className="w-full max-w-md mx-auto">
         <CardHeader className="text-center">
-          <CardTitle className="font-headline text-4xl">Welcome Back!</CardTitle>
-          <CardDescription>Log in to your RecipeRadar account.</CardDescription>
+          <CardTitle className="font-headline text-4xl">Forgot Password?</CardTitle>
+          <CardDescription>No problem. Enter your email address and we&apos;ll send you a link to reset it.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -74,31 +67,15 @@ export default function LoginPage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <div className="flex justify-between items-end">
-                      <Label htmlFor="password">Password</Label>
-                      <Link href="/forgot-password" passHref className="text-sm text-muted-foreground hover:text-primary underline">
-                        Forgot Password?
-                      </Link>
-                    </div>
-                    <FormControl><Input id="password" type="password" placeholder="********" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
               <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Logging In...' : 'Log In'}
+                {form.formState.isSubmitting ? 'Sending...' : 'Send Reset Link'}
               </Button>
             </form>
           </Form>
           <div className="mt-4 text-center text-sm">
-            Don&apos;t have an account?{" "}
-            <Link href="/signup" className="underline hover:text-primary">
-              Sign up
+            Remembered your password?{" "}
+            <Link href="/login" className="underline hover:text-primary">
+              Log in
             </Link>
           </div>
         </CardContent>

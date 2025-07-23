@@ -11,18 +11,20 @@ A complete, executable SQL script is available at `database/schema.sql`.
 
 1. [Automated Triggers](#1-automated-triggers)
 2. [Users](#2-users)
-3. [Recipes](#3-recipes)
-4. [Ingredients](#4-ingredients)
-5. [Steps](#5-steps)
-6. [Tips](#6-tips)
-7. [User Favorites (Junction Table)](#7-user-favorites)
-8. [User Favorite Cuisines (Junction Table)](#8-user-favorite-cuisines)
-9. [Groups](#9-groups)
-10. [Group Members (Junction Table)](#10-group-members)
-11. [Posts](#11-posts)
-12. [Comments](#12-comments)
-13. [Post Reactions (Junction Table)](#13-post-reactions)
-14. [Reports](#14-reports)
+3. [Sessions](#3-sessions)
+4. [Recipes](#4-recipes)
+5. [Ingredients](#5-ingredients)
+6. [Steps](#6-steps)
+7. [Tips](#7-tips)
+8. [User Favorites (Junction Table)](#8-user-favorites)
+9. [User Favorite Cuisines (Junction Table)](#9-user-favorite-cuisines)
+10. [Groups](#10-groups)
+11. [Group Members (Junction Table)](#11-group-members)
+12. [Posts](#12-posts)
+13. [Comments](#13-comments)
+14. [Post Reactions (Junction Table)](#14-post-reactions)
+15. [Reports](#15-reports)
+
 
 ---
 
@@ -52,12 +54,21 @@ This function denormalizes the average rating and rating count on the `recipes` 
 CREATE OR REPLACE FUNCTION update_recipe_rating()
 RETURNS TRIGGER AS $$
 BEGIN
-    UPDATE recipes
-    SET
-        rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = NEW.recipe_id),
-        average_rating = (SELECT AVG(rating) FROM tips WHERE recipe_id = NEW.recipe_id)
-    WHERE id = NEW.recipe_id;
-    RETURN NEW;
+    IF (TG_OP = 'DELETE') THEN
+        UPDATE recipes
+        SET
+            rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = OLD.recipe_id),
+            average_rating = COALESCE((SELECT AVG(rating) FROM tips WHERE recipe_id = OLD.recipe_id), 0)
+        WHERE id = OLD.recipe_id;
+        RETURN OLD;
+    ELSE
+        UPDATE recipes
+        SET
+            rating_count = (SELECT COUNT(*) FROM tips WHERE recipe_id = NEW.recipe_id),
+            average_rating = COALESCE((SELECT AVG(rating) FROM tips WHERE recipe_id = NEW.recipe_id), 0)
+        WHERE id = NEW.recipe_id;
+        RETURN NEW;
+    END IF;
 END;
 $$ language 'plpgsql';
 ```
@@ -66,26 +77,50 @@ $$ language 'plpgsql';
 
 ### 2. `users`
 
-Stores information about registered users.
+Stores information about registered users, including fields for rate-limiting and personalization.
 
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     is_admin BOOLEAN DEFAULT FALSE,
-    suspended_until TIMESTAMPTZ, -- For soft-suspensions
+    suspended_until TIMESTAMPTZ,
     country VARCHAR(100),
     dietary_preference VARCHAR(50) CHECK (dietary_preference IN ('All', 'Vegetarian', 'Non-Vegetarian', 'Vegan')),
     avatar_seed VARCHAR(255) NOT NULL,
-    -- Email Verification Fields
+    
+    -- Email Verification Fields (for initial signup)
     is_verified BOOLEAN DEFAULT FALSE,
     verification_otp CHAR(6),
     verification_otp_expires TIMESTAMPTZ,
-    -- Personalization & Gamification
+    verification_emails_sent SMALLINT DEFAULT 0,
+    last_verification_email_sent_at TIMESTAMPTZ,
+    
+    -- Email Change Fields
+    pending_new_email VARCHAR(255),
+    new_email_otp CHAR(6),
+    new_email_otp_expires TIMESTAMPTZ,
+    new_email_requests_sent SMALLINT DEFAULT 0,
+    last_new_email_request_at TIMESTAMPTZ,
+
+    -- Password Reset Fields
+    password_reset_token CHAR(36),
+    password_reset_token_expires TIMESTAMPTZ,
+    password_reset_requests_sent SMALLINT DEFAULT 0,
+    last_password_reset_request_at TIMESTAMPTZ,
+    
+    -- Rate Limiting Fields
+    password_change_attempts SMALLINT DEFAULT 0,
+    last_password_attempt_at TIMESTAMPTZ,
+    name_last_changed_at TIMESTAMPTZ,
+
+    -- Engagement & Personalization Fields
     read_history UUID[] DEFAULT ARRAY[]::UUID[],
     achievements TEXT[] DEFAULT ARRAY[]::TEXT[],
+    
+    -- General Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -94,6 +129,10 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 -- Index for finding users by verification OTP
 CREATE INDEX idx_users_verification_otp ON users(verification_otp);
+-- Index for finding users by new email OTP
+CREATE INDEX idx_users_new_email_otp ON users(new_email_otp);
+-- Index for finding users by password reset token
+CREATE INDEX idx_users_password_reset_token ON users(password_reset_token);
 -- GIN index for efficiently querying the read_history array
 CREATE INDEX idx_users_read_history ON users USING GIN(read_history);
 
@@ -105,7 +144,23 @@ CREATE TRIGGER update_users_modtime
     EXECUTE FUNCTION update_modified_column();
 ```
 
-### 3. `recipes`
+### 3. `sessions`
+
+Stores stateful session data, allowing for server-side session invalidation.
+
+```sql
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for quickly finding a user's session
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+```
+
+### 4. `recipes`
 
 Stores all core recipe data.
 
@@ -142,7 +197,7 @@ CREATE TRIGGER update_recipes_modtime
     EXECUTE FUNCTION update_modified_column();
 ```
 
-### 4. `ingredients`
+### 5. `ingredients`
 
 Stores the ingredients for each recipe in a normalized way.
 
@@ -162,7 +217,7 @@ CREATE TABLE ingredients (
 CREATE INDEX idx_ingredients_recipe_id ON ingredients(recipe_id);
 ```
 
-### 5. `steps`
+### 6. `steps`
 
 Stores the cooking steps for each recipe.
 
@@ -179,7 +234,7 @@ CREATE TABLE steps (
 CREATE INDEX idx_steps_recipe_id_step_number ON steps(recipe_id, step_number);
 ```
 
-### 6. `tips`
+### 7. `tips`
 
 Stores user-submitted tips and ratings for recipes. This also serves as the basis for the recipe's average rating.
 
@@ -212,7 +267,7 @@ CREATE TRIGGER update_rating_on_tip_change
     EXECUTE FUNCTION update_recipe_rating();
 ```
 
-### 7. `user_favorites`
+### 8. `user_favorites`
 
 A junction table to manage the many-to-many relationship between users and their favorite recipes.
 
@@ -225,7 +280,7 @@ CREATE TABLE user_favorites (
 );
 ```
 
-### 8. `user_favorite_cuisines`
+### 9. `user_favorite_cuisines`
 
 A junction table for a user's favorite cuisines (regions).
 
@@ -237,7 +292,7 @@ CREATE TABLE user_favorite_cuisines (
 );
 ```
 
-### 9. `groups`
+### 10. `groups`
 
 Stores community group information.
 
@@ -246,7 +301,7 @@ CREATE TABLE groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    creator_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL, -- Keep group if creator deletes account
+    creator_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Keep group if creator deletes account
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -258,7 +313,7 @@ CREATE TRIGGER update_groups_modtime
     EXECUTE FUNCTION update_modified_column();
 ```
 
-### 10. `group_members`
+### 11. `group_members`
 
 A junction table to manage the many-to-many relationship between users and groups.
 
@@ -271,9 +326,9 @@ CREATE TABLE group_members (
 );
 ```
 
-### 11. `posts`
+### 12. `posts`
 
-Stores posts made within a community group.
+Stores posts made within a community group. Includes a field for shared recipes.
 
 ```sql
 CREATE TABLE posts (
@@ -296,7 +351,7 @@ CREATE TRIGGER update_posts_modtime
     EXECUTE FUNCTION update_modified_column();
 ```
 
-### 12. `comments`
+### 13. `comments`
 
 Stores comments made on posts.
 
@@ -320,7 +375,7 @@ CREATE TRIGGER update_comments_modtime
     EXECUTE FUNCTION update_modified_column();
 ```
 
-### 13. `post_reactions`
+### 14. `post_reactions`
 
 Manages likes and dislikes on posts.
 
@@ -336,7 +391,7 @@ CREATE TABLE post_reactions (
 );
 ```
 
-### 14. `reports`
+### 15. `reports`
 
 A polymorphic table to handle reports for different types of content (e.g., posts, comments).
 

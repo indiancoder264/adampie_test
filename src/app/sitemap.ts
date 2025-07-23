@@ -4,6 +4,8 @@ import { fetchRecipes, fetchGroups } from '@/lib/data';
 
 // IMPORTANT: For this to work in production, you must set the
 // NEXT_PUBLIC_BASE_URL environment variable to your website's domain.
+// This is also a critical security measure to prevent "Host Header Injection" attacks
+// when generating absolute URLs in things like password reset emails.
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

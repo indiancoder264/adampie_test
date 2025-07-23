@@ -51,7 +51,8 @@ This is the most important step for connecting your database and email service s
     *   **Value:** Paste your API key from Resend here.
 
     *   **Name:** `NEXT_PUBLIC_BASE_URL`
-    *   **Value:** Enter the final URL your site will have (e.g., `https://my-recipe-app.vercel.app`). This is important for generating the `sitemap.xml` file correctly. Vercel provides this URL after the first deployment. You can add it later, but it's good to be aware of.
+    *   **Value:** Enter the final, public URL of your site (e.g., `https://my-recipe-app.vercel.app`). 
+    *   **Security Note:** This variable is **critical for security**. It is used to generate password reset links, sitemaps, and other absolute URLs. Using a fixed, trusted URL from this variable prevents "Host Header Injection" attacks. Never construct these links dynamically from request headers.
 
     **Security Note:** Vercel encrypts these environment variables, ensuring they are never exposed to the client-side code. This is the correct and secure way to handle secrets.
 

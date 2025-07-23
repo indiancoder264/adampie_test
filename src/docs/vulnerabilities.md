@@ -1,4 +1,3 @@
-
 # RecipeRadar - Security Vulnerability Assessment
 
 This document outlines potential security vulnerabilities and areas for improvement within the RecipeRadar application. While the app employs several security best practices, this assessment is intended to guide future hardening efforts for a production environment.
@@ -8,11 +7,9 @@ This document outlines potential security vulnerabilities and areas for improvem
 ## 1. Authentication & Session Management
 
 ### 1.1. Session Token Vulnerabilities
-- **Vulnerability:** The session management relies on a simple JSON object stored in an `httpOnly` cookie. While `httpOnly` prevents direct access via client-side JavaScript (mitigating XSS-based token theft), the session token itself has weaknesses.
-- **Risks:**
-    - **No Server-Side Expiration:** The session token doesn't have a server-enforced expiration date. It only expires when the browser cookie does. An attacker who compromises a token could potentially use it for up to a week.
-    - **Session Fixation:** There's no mechanism to regenerate the session cookie upon login or privilege escalation (like changing a password), which could make session fixation attacks theoretically possible.
-- **Recommendation:** Implement a robust, server-side session management system. Store session IDs in the cookie and corresponding session data in the database or a Redis cache with a server-enforced Time-To-Live (TTL).
+- **Vulnerability:** The application now uses database-backed sessions, which is a major improvement. However, the session tokens themselves do not automatically rotate and old sessions are only cleaned out when they expire.
+- **Risks:** While logout and password changes correctly invalidate sessions, a very long-lived session could still pose a risk if the database record is ever compromised.
+- **Recommendation:** For extremely high-security applications, implement session token rotation, where the session ID is changed periodically during a user's active session.
 
 ### 1.2. Insecure Admin Authentication
 - **Vulnerability:** ~~The primary administrator login is handled by comparing user input against plaintext environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`).~~
@@ -58,5 +55,17 @@ This document outlines potential security vulnerabilities and areas for improvem
     - **Name Changes:** Limited to 1 change per week.
     - **Email Change Requests:** Limited to 2 requests per day.
 - **Recommendation:** Implement a more robust, IP-based rate-limiting solution using a middleware or a dedicated service like Upstash for more comprehensive protection.
-
     
+## 6. Host Header Injection in Password Reset Flow
+
+- **Vulnerability:** The application does not yet have a password reset feature, but when it is implemented, it could be vulnerable to Host Header Injection.
+- **Risks:** An attacker could trick the server into generating a password reset link that points to a malicious domain. If they can get the legitimate user (e.g., an admin) to click this link, the attacker can intercept the password reset token and take over the account. This happens if the server action naively trusts the `Host` header from the incoming request to construct the link.
+- **Prevention Guidance:**
+    1.  **NEVER** use the `Host` header from the browser to construct absolute URLs.
+    2.  **ALWAYS** use a canonical URL stored in an environment variable for generating links in emails or other services.
+    3.  This application is pre-configured to use `process.env.NEXT_PUBLIC_BASE_URL` for this purpose. When building a password reset feature, ensure all links are constructed using this variable, like so:
+        ```typescript
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+        const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
+        ```
+    4.  The `NEXT_PUBLIC_BASE_URL` variable **must be set** in the hosting environment (e.g., Vercel) for this protection to work.
