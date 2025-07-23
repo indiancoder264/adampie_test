@@ -61,16 +61,30 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
   }, [serverGroups]);
 
   useEffect(() => {
+    if (!supabase) {
+      console.warn("Supabase client not available, real-time Community updates disabled.");
+      return;
+    }
+    
     const handleGroupChanges = (payload: any) => {
       const { eventType, new: newRecord, old } = payload;
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
-          return [...currentGroups, newRecord as Group];
+            // When a new group is created, its members/posts array might be null initially.
+            // We ensure they are initialized to empty arrays to prevent errors.
+            const groupToAdd: Group = {
+                ...newRecord,
+                members: newRecord.members || [],
+                posts: newRecord.posts || [],
+            };
+          return [...currentGroups, groupToAdd];
         }
         if (eventType === 'UPDATE') {
           return currentGroups.map(group => group.id === newRecord.id ? { ...group, ...newRecord } : group);
         }
         if (eventType === 'DELETE') {
+          // The 'old' object might be empty in some cases, so we check for old.id
+          if (!old || !old.id) return currentGroups;
           return currentGroups.filter(group => group.id !== old.id);
         }
         return currentGroups;
@@ -105,3 +119,4 @@ export const useCommunity = () => {
   }
   return context;
 };
+
