@@ -26,6 +26,7 @@ export type Comment = {
 
 export type Post = {
   id: string;
+  group_id: string;
   author_id: string;
   author_name: string;
   content: string;
@@ -58,7 +59,6 @@ const CommunityContext = createContext<CommunityContextType | undefined>(undefin
 export const CommunityProvider = ({ children, initialGroups: serverGroups }: { children: ReactNode, initialGroups: Group[] }) => {
   const [groups, setGroups] = useState<Group[]>(serverGroups || []);
   const { allUsers } = useAllUsers();
-  const { user } = useAuth();
 
   useEffect(() => {
     setGroups(serverGroups);
@@ -72,20 +72,16 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
             const creator = allUsers.find(u => u.id === newRecord.creator_id);
-            // Construct a complete group object to prevent rendering issues.
             const groupToAdd: Group = {
                 id: newRecord.id,
                 name: newRecord.name,
                 description: newRecord.description,
                 creator_id: newRecord.creator_id,
                 created_at: newRecord.created_at,
-                // The creator is automatically the first member.
                 members: [newRecord.creator_id],
                 posts: [],
-                // Look up the creator's name from the existing user list.
                 creator_name: creator?.name || 'Unknown User',
             };
-            // Avoid adding duplicates
             if (currentGroups.some(g => g.id === groupToAdd.id)) {
                 return currentGroups;
             }
@@ -94,14 +90,12 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
         if (eventType === 'UPDATE') {
           return currentGroups.map(group => {
               if (group.id === newRecord.id) {
-                  // Merge existing data with new data to prevent overwriting fields like creator_name
                   return { ...group, ...newRecord };
               }
               return group;
           });
         }
         if (eventType === 'DELETE') {
-          // The 'old' object might be empty in some cases, so we check for old.id
           if (!old || !old.id) return currentGroups;
           return currentGroups.filter(group => group.id !== old.id);
         }
@@ -110,7 +104,7 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
     };
     
     const channel = supabase
-      .channel('community-changes')
+      .channel('community-group-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, handleGroupChanges)
       .subscribe();
 

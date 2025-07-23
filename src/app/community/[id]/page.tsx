@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { cn } from "@/lib/utils";
-import { useCommunity, type Post, type Comment } from "@/lib/community";
+import { useCommunity, type Post, type Comment, type Group } from "@/lib/community";
 import { useAuth } from "@/lib/auth";
 import { useAllUsers } from "@/lib/users";
 import { useToast } from "@/hooks/use-toast";
@@ -62,6 +62,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import Image from "next/image";
+import { supabase } from "@/lib/supabase";
 
 
 const postSchema = z.object({
@@ -603,9 +604,97 @@ export default function GroupDetailPage() {
   const [visiblePostsCount, setVisiblePostsCount] = React.useState(10);
   const [visibleMembersCount, setVisibleMembersCount] = React.useState(12);
 
-  const group = React.useMemo(() => {
-    return groups.find((g) => g.id === params.id);
+  const [group, setGroup] = React.useState<Group | undefined | null>(undefined);
+  
+  React.useEffect(() => {
+    const initialGroup = groups.find((g) => g.id === params.id);
+    if(initialGroup) {
+      setGroup(initialGroup);
+    } else if (groups.length > 0) {
+      setGroup(null); // Explicitly null if not found after groups have loaded
+    }
   }, [groups, params.id]);
+
+
+  // Real-time listeners for posts and comments
+  React.useEffect(() => {
+    if (!supabase || !params.id) return;
+    
+    const userMap = new Map(allUsers.map(u => [u.id, u.name]));
+
+    const handlePostChange = (payload: any) => {
+      setGroup(currentGroup => {
+        if (!currentGroup) return currentGroup;
+        const { eventType, new: newRecord, old } = payload;
+        
+        if (eventType === 'INSERT') {
+          const authorName = userMap.get(newRecord.author_id) || 'Unknown User';
+          const newPost = { ...newRecord, author_name: authorName, comments: [], likes: [], dislikes: [] };
+          return { ...currentGroup, posts: [newPost, ...currentGroup.posts] };
+        }
+        if (eventType === 'UPDATE') {
+          return { ...currentGroup, posts: currentGroup.posts.map(p => p.id === newRecord.id ? {...p, ...newRecord} : p) };
+        }
+        if (eventType === 'DELETE') {
+          return { ...currentGroup, posts: currentGroup.posts.filter(p => p.id !== old.id) };
+        }
+        return currentGroup;
+      });
+    };
+    
+    const handleCommentChange = (payload: any) => {
+      setGroup(currentGroup => {
+        if (!currentGroup) return currentGroup;
+        const { eventType, new: newRecord, old } = payload;
+        
+        if (eventType === 'INSERT') {
+          const authorName = userMap.get(newRecord.author_id) || 'Unknown User';
+          const newComment = { ...newRecord, author_name: authorName };
+          const posts = currentGroup.posts.map(post => {
+            if (post.id === newRecord.post_id) {
+              return { ...post, comments: [...post.comments, newComment] };
+            }
+            return post;
+          });
+          return { ...currentGroup, posts };
+        }
+        if (eventType === 'UPDATE') {
+           const posts = currentGroup.posts.map(post => {
+            if (post.id === newRecord.post_id) {
+              const comments = post.comments.map(c => c.id === newRecord.id ? {...c, ...newRecord} : c);
+              return { ...post, comments };
+            }
+            return post;
+          });
+          return { ...currentGroup, posts };
+        }
+        if (eventType === 'DELETE') {
+          const posts = currentGroup.posts.map(post => {
+            if (post.id === old.post_id) {
+                return { ...post, comments: post.comments.filter(c => c.id !== old.id) };
+            }
+            return post;
+          });
+          return { ...currentGroup, posts };
+        }
+        return currentGroup;
+      });
+    };
+    
+    const postsChannel = supabase.channel(`group-${params.id}-posts`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `group_id=eq.${params.id}` }, handlePostChange)
+      .subscribe();
+      
+    const commentsChannel = supabase.channel(`group-${params.id}-comments`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, handleCommentChange)
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(postsChannel);
+      supabase.removeChannel(commentsChannel);
+    };
+
+  }, [params.id, allUsers]);
 
   const form = useForm<z.infer<typeof postSchema>>({
     resolver: zodResolver(postSchema),
@@ -636,9 +725,11 @@ export default function GroupDetailPage() {
   
   const postsToShow = filteredPosts.slice(0, visiblePostsCount);
 
-  if (!group) {
-    // This could be a loading state in a real app.
-    // For now, if the group isn't found in the client-side context, treat as not found.
+  if (group === undefined) {
+    return <div>Loading...</div>
+  }
+  
+  if (group === null) {
     return notFound();
   }
   
