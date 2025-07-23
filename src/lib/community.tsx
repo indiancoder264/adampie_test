@@ -3,6 +3,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import type { Recipe } from "./recipes";
+import { supabase } from "./supabase";
 
 // Types
 export type Report = {
@@ -46,24 +47,49 @@ export type Group = {
   posts: Post[];
 };
 
-const initialGroups: Group[] = [];
-
 type CommunityContextType = {
   groups: Group[];
-  // All mutation-related functions are now handled by server actions.
-  // The context is now primarily for distributing client-side state.
 };
 
 const CommunityContext = createContext<CommunityContextType | undefined>(undefined);
 
 export const CommunityProvider = ({ children, initialGroups: serverGroups }: { children: ReactNode, initialGroups: Group[] }) => {
-  const [groups, setGroups] = useState<Group[]>(serverGroups || initialGroups);
+  const [groups, setGroups] = useState<Group[]>(serverGroups || []);
 
   useEffect(() => {
-    // Data is now passed in from the root layout, but we can update it if it changes
     setGroups(serverGroups);
   }, [serverGroups]);
 
+  useEffect(() => {
+    const handleGroupChanges = (payload: any) => {
+      const { eventType, new: newRecord, old } = payload;
+      setGroups(currentGroups => {
+        if (eventType === 'INSERT') {
+          return [...currentGroups, newRecord as Group];
+        }
+        if (eventType === 'UPDATE') {
+          return currentGroups.map(group => group.id === newRecord.id ? { ...group, ...newRecord } : group);
+        }
+        if (eventType === 'DELETE') {
+          return currentGroups.filter(group => group.id !== old.id);
+        }
+        return currentGroups;
+      });
+    };
+    
+    // This is a simplified listener. A full implementation would need to handle
+    // updates to posts, comments, members, etc., and merge them into the correct group.
+    // For now, we'll listen to the top-level group changes.
+    const channel = supabase
+      .channel('community-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, handleGroupChanges)
+      // In a real app, you would add more listeners for posts, comments, etc.
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   return (
     <CommunityContext.Provider value={{ groups }}>

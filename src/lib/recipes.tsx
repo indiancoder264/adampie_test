@@ -2,8 +2,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
-import { useToast } from "@/hooks/use-toast";
-import type { User } from "@/lib/auth";
+import { supabase } from "./supabase";
 
 // Types
 export type Ingredient = {
@@ -50,26 +49,45 @@ export type Recipe = {
   dietary_notes: string[];
 };
 
-// This is just to satisfy the initial empty state.
-const initialRecipes: Recipe[] = [];
-
 type RecipeContextType = {
   recipes: Recipe[];
-  // All mutation-related functions are now handled by server actions.
-  // The context is now primarily for distributing client-side state.
 };
 
 const RecipeContext = createContext<RecipeContextType | undefined>(undefined);
 
-// This provider will fetch data on the client side.
-// A more advanced implementation might use server components to fetch initial data.
 export const RecipeProvider = ({ children, initialRecipes: serverRecipes }: { children: ReactNode, initialRecipes: Recipe[] }) => {
-  const [recipes, setRecipes] = useState<Recipe[]>(serverRecipes || initialRecipes);
+  const [recipes, setRecipes] = useState<Recipe[]>(serverRecipes || []);
 
   useEffect(() => {
-    // Data is now passed in from the root layout, but we can update it if it changes
     setRecipes(serverRecipes);
   }, [serverRecipes]);
+
+  useEffect(() => {
+    const handleRecipeChanges = (payload: any) => {
+        const { eventType, new: newRecord, old } = payload;
+        setRecipes(currentRecipes => {
+            if (eventType === 'INSERT') {
+                return [...currentRecipes, newRecord as Recipe];
+            }
+            if (eventType === 'UPDATE') {
+                return currentRecipes.map(recipe => recipe.id === newRecord.id ? { ...recipe, ...newRecord } : recipe);
+            }
+            if (eventType === 'DELETE') {
+                return currentRecipes.filter(recipe => recipe.id !== old.id);
+            }
+            return currentRecipes;
+        });
+    };
+
+    const channel = supabase
+      .channel('recipe-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recipes' }, handleRecipeChanges)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   return (
     <RecipeContext.Provider value={{ recipes }}>

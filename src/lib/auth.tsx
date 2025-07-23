@@ -4,6 +4,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useTransition } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { toggleFavoriteAction } from "./actions";
+import { supabase } from "./supabase";
 
 export type User = {
   id: string;
@@ -29,8 +30,6 @@ export type User = {
 type AuthContextType = {
   user: User | null;
   toggleFavorite: (recipeId: string) => void;
-  // Note: updateUser and updateFavoriteCuisines are removed from here
-  // and are now handled directly in the profile page to prevent toast conflicts.
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -42,6 +41,31 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
 
   useEffect(() => {
     setUser(initialUser);
+  }, [initialUser]);
+
+  useEffect(() => {
+    if (!initialUser) return;
+
+    const channel = supabase
+      .channel('user-updates')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${initialUser.id}` },
+        (payload) => {
+            console.log('User data changed!', payload.new);
+            // This is a simplified update. A real implementation might need more sophisticated merging.
+            setUser(prevUser => {
+                if (!prevUser) return null;
+                const updatedUser = payload.new as Partial<User>;
+                return { ...prevUser, ...updatedUser };
+            });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [initialUser]);
 
   const toggleFavorite = (recipeId: string) => {
@@ -58,7 +82,8 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
       const result = await toggleFavoriteAction(recipeId);
       if (result.success) {
         toast({ title: result.isFavorite ? "Added to Favorites!" : "Removed from Favorites" });
-        // Optimistically update user state
+        // The UI will now update via the realtime subscription, so optimistic updates are less critical.
+        // We can leave this here for a faster "feel" on the client that performed the action.
         setUser(prevUser => {
           if (!prevUser) return null;
           const newFavorites = result.isFavorite
