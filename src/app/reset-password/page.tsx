@@ -1,9 +1,8 @@
 
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -15,9 +14,12 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { resetPasswordAction } from "@/lib/actions";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 
 const resetPasswordSchema = z.object({
+  email: z.string().email("Please enter a valid email address."),
+  otp: z.string().min(6, "Please enter the 6-digit code."),
   password: z.string()
     .min(8, "Password must be at least 8 characters.")
     .regex(/[a-zA-Z]/, "Password must contain at least one letter.")
@@ -32,31 +34,32 @@ const resetPasswordSchema = z.object({
 function ResetPasswordForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const token = searchParams.get('token');
+    const emailFromQuery = searchParams.get('email');
     const { toast } = useToast();
 
     const form = useForm<z.infer<typeof resetPasswordSchema>>({
         resolver: zodResolver(resetPasswordSchema),
-        defaultValues: { password: "", confirmPassword: "" },
+        defaultValues: { 
+          email: emailFromQuery || "", 
+          otp: "",
+          password: "", 
+          confirmPassword: "" 
+        },
     });
     
-    React.useEffect(() => {
-        if (!token) {
+    useEffect(() => {
+        if (!emailFromQuery) {
             toast({
                 title: "Invalid Link",
-                description: "The password reset link is missing or invalid. Please request a new one.",
+                description: "The password reset page was accessed without an email. Please start from the 'Forgot Password' page.",
                 variant: "destructive",
             });
             router.push('/forgot-password');
         }
-    }, [token, router, toast]);
-
+    }, [emailFromQuery, router, toast]);
 
     const onSubmit = async (values: z.infer<typeof resetPasswordSchema>) => {
-        if (!token) return;
-
-        const result = await resetPasswordAction(token, values.password);
-
+        const result = await resetPasswordAction(values);
         if (result.success) {
             toast({
                 title: "Password Reset!",
@@ -72,7 +75,7 @@ function ResetPasswordForm() {
         }
     };
 
-    if (!token) {
+    if (!emailFromQuery) {
         return null; // Render nothing while redirecting
     }
 
@@ -81,11 +84,44 @@ function ResetPasswordForm() {
             <Card className="w-full max-w-md mx-auto">
                 <CardHeader className="text-center">
                     <CardTitle className="font-headline text-4xl">Reset Your Password</CardTitle>
-                    <CardDescription>Choose a new, secure password for your account.</CardDescription>
+                    <CardDescription>Enter the code from your email and choose a new password.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                            <FormField
+                                control={form.control}
+                                name="email"
+                                render={({ field }) => (
+                                <FormItem>
+                                    <Label>Email</Label>
+                                    <FormControl><Input type="email" placeholder="you@example.com" {...field} readOnly /></FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="otp"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <Label>Verification Code</Label>
+                                    <FormControl>
+                                      <InputOTP maxLength={6} {...field}>
+                                        <InputOTPGroup>
+                                          <InputOTPSlot index={0} />
+                                          <InputOTPSlot index={1} />
+                                          <InputOTPSlot index={2} />
+                                          <InputOTPSlot index={3} />
+                                          <InputOTPSlot index={4} />
+                                          <InputOTPSlot index={5} />
+                                        </InputOTPGroup>
+                                      </InputOTP>
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
                             <FormField
                                 control={form.control}
                                 name="password"
@@ -126,4 +162,3 @@ export default function ResetPasswordPage() {
         </Suspense>
     )
 }
-

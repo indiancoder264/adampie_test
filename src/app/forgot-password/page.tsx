@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { requestPasswordResetAction } from "@/lib/actions";
+import { useRouter } from "next/navigation";
 
 const forgotPasswordSchema = z.object({
   email: z.string().email("Please enter a valid email address."),
@@ -20,6 +21,7 @@ const forgotPasswordSchema = z.object({
 
 export default function ForgotPasswordPage() {
   const { toast } = useToast();
+  const router = useRouter();
 
   const form = useForm<z.infer<typeof forgotPasswordSchema>>({
     resolver: zodResolver(forgotPasswordSchema),
@@ -34,9 +36,9 @@ export default function ForgotPasswordPage() {
     if (result.success) {
       toast({
         title: "Check Your Email",
-        description: "If an account with that email exists, we've sent instructions to reset your password.",
+        description: "If an account with that email exists, we've sent a code to reset your password.",
       });
-      form.reset();
+      router.push(`/reset-password?email=${encodeURIComponent(values.email)}`);
     } else {
       toast({
         title: "Error",
@@ -51,7 +53,7 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md mx-auto">
         <CardHeader className="text-center">
           <CardTitle className="font-headline text-4xl">Forgot Password?</CardTitle>
-          <CardDescription>No problem. Enter your email address and we&apos;ll send you a link to reset it.</CardDescription>
+          <CardDescription>No problem. Enter your email address and we&apos;ll send you a 6-digit code to reset it.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -68,7 +70,7 @@ export default function ForgotPasswordPage() {
                 )}
               />
               <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Sending...' : 'Send Reset Link'}
+                {form.formState.isSubmitting ? 'Sending...' : 'Send Reset Code'}
               </Button>
             </form>
           </Form>

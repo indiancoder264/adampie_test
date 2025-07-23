@@ -65,7 +65,7 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
     try {
         await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
-            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com', // For testing
+            to: email,
             subject: subject,
             html: htmlContent,
         });
@@ -253,31 +253,23 @@ export async function requestPasswordResetAction(email: string) {
             requestsSent = 0;
         }
 
-        const token = randomUUID();
-        const tokenExpires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
         await client.query(
             'UPDATE users SET password_reset_token = $1, password_reset_token_expires = $2, password_reset_requests_sent = $3, last_password_reset_request_at = NOW() WHERE id = $4',
-            [token, tokenExpires, requestsSent + 1, user.id]
+            [otp, otpExpires, requestsSent + 1, user.id]
         );
-
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-        if (!baseUrl) {
-            await client.query('ROLLBACK');
-            console.error("NEXT_PUBLIC_BASE_URL is not set. Cannot send password reset email.");
-            return { success: false, error: "Server configuration error prevents sending reset email." };
-        }
-        const resetLink = `${baseUrl}/reset-password?token=${token}`;
         
         const emailHtml = `
-            <div style="font-family: sans-serif; padding: 20px;">
+            <div style="font-family: sans-serif; text-align: center; padding: 20px;">
                 <h2>Password Reset Request</h2>
-                <p>You requested a password reset for your RecipeRadar account. Click the link below to set a new password:</p>
-                <p><a href="${resetLink}" style="padding: 10px 15px; background-color: #FF7A45; color: white; text-decoration: none; border-radius: 5px;">Reset Your Password</a></p>
-                <p>This link will expire in 1 hour. If you did not request this, please ignore this email.</p>
+                <p>You requested a password reset for your RecipeRadar account. Your 6-digit code is:</p>
+                <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">${otp}</p>
+                <p>This code will expire in 10 minutes. If you did not request this, please ignore this email.</p>
             </div>
         `;
-        await sendEmail(user.email, 'Reset Your RecipeRadar Password', emailHtml);
+        await sendEmail(user.email, 'Your RecipeRadar Password Reset Code', emailHtml);
         
         await client.query('COMMIT');
         return { success: true };
@@ -291,25 +283,26 @@ export async function requestPasswordResetAction(email: string) {
     }
 }
 
-export async function resetPasswordAction(token: string, newPassword: string) {
+export async function resetPasswordAction(data: { email: string, otp: string, password: string}) {
+    const { email, otp, password } = data;
     const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         
-        const userRes = await client.query('SELECT * FROM users WHERE password_reset_token = $1', [token]);
+        const userRes = await client.query('SELECT * FROM users WHERE email = $1 AND password_reset_token = $2', [email, otp]);
         if (userRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return { success: false, error: "This password reset link is invalid. It may have been used already." };
+            return { success: false, error: "Invalid password reset code. Please try again." };
         }
         const user = userRes.rows[0];
 
         if (new Date(user.password_reset_token_expires) < new Date()) {
             await client.query('ROLLBACK');
-            return { success: false, error: "This password reset link has expired. Please request a new one." };
+            return { success: false, error: "This password reset code has expired. Please request a new one." };
         }
 
-        const newPasswordHash = await bcrypt.hash(newPassword, 10);
+        const newPasswordHash = await bcrypt.hash(password, 10);
         await client.query(
             'UPDATE users SET password_hash = $1, password_reset_token = NULL, password_reset_token_expires = NULL WHERE id = $2',
             [newPasswordHash, user.id]
@@ -329,6 +322,7 @@ export async function resetPasswordAction(token: string, newPassword: string) {
         client.release();
     }
 }
+
 
 // --- Recipe Actions ---
 
