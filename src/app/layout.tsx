@@ -21,7 +21,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   // Read session token from cookie
-  const sessionToken = cookies().get('session_token')?.value;
+  const cookieStore = cookies();
+  const sessionToken = (await cookieStore).get('session_token')?.value;
   let currentUser: User | null = null;
   
   if (sessionToken) {
@@ -38,8 +39,10 @@ export default async function RootLayout({
         // Fetch the full user object if the session is valid
         currentUser = await fetchUserById(userId);
       } else {
-         // If session is invalid or expired, delete the cookie
-         cookies().delete('session_token');
+        (await cookies()).delete('session_token');
+         // If session is invalid or expired, we simply don't set a user.
+         // The server correctly treats this user as logged out.
+         // The invalid cookie will be overwritten on next login.
       }
 
     } catch(error) {
