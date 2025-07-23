@@ -66,7 +66,7 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
         await resend.emails.send({
             from: 'RecipeRadar <onboarding@resend.dev>',
             // The line below is temporarily hardcoded for development without a custom domain.
-            to: 'Bobby.ch6969@gmail.com',
+            to:  process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
             // TODO: When a custom domain is configured with Resend, replace the line above with the one below.
             // to: email,
             subject: subject,
