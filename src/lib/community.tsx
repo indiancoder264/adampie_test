@@ -4,6 +4,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import type { Recipe } from "./recipes";
 import { supabase } from "./supabase";
+import { useAuth } from "./auth";
+import { useAllUsers } from "./users";
 
 // Types
 export type Report = {
@@ -55,32 +57,44 @@ const CommunityContext = createContext<CommunityContextType | undefined>(undefin
 
 export const CommunityProvider = ({ children, initialGroups: serverGroups }: { children: ReactNode, initialGroups: Group[] }) => {
   const [groups, setGroups] = useState<Group[]>(serverGroups || []);
+  const { allUsers } = useAllUsers();
+  const { user } = useAuth();
 
   useEffect(() => {
     setGroups(serverGroups);
   }, [serverGroups]);
 
   useEffect(() => {
-    if (!supabase) {
-      console.warn("Supabase client not available, real-time Community updates disabled.");
-      return;
-    }
+    if (!supabase) return;
     
     const handleGroupChanges = (payload: any) => {
       const { eventType, new: newRecord, old } = payload;
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
-            // When a new group is created, its members/posts array might be null initially.
-            // We ensure they are initialized to empty arrays to prevent errors.
+            const creator = allUsers.find(u => u.id === newRecord.creator_id);
+            // Construct a complete group object to prevent rendering issues.
             const groupToAdd: Group = {
-                ...newRecord,
-                members: newRecord.members || [],
-                posts: newRecord.posts || [],
+                id: newRecord.id,
+                name: newRecord.name,
+                description: newRecord.description,
+                creator_id: newRecord.creator_id,
+                created_at: newRecord.created_at,
+                // The creator is automatically the first member.
+                members: [newRecord.creator_id],
+                posts: [],
+                // Look up the creator's name from the existing user list.
+                creator_name: creator?.name || 'Unknown User',
             };
           return [...currentGroups, groupToAdd];
         }
         if (eventType === 'UPDATE') {
-          return currentGroups.map(group => group.id === newRecord.id ? { ...group, ...newRecord } : group);
+          return currentGroups.map(group => {
+              if (group.id === newRecord.id) {
+                  // Merge existing data with new data to prevent overwriting fields like creator_name
+                  return { ...group, ...newRecord };
+              }
+              return group;
+          });
         }
         if (eventType === 'DELETE') {
           // The 'old' object might be empty in some cases, so we check for old.id
@@ -91,19 +105,15 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
       });
     };
     
-    // This is a simplified listener. A full implementation would need to handle
-    // updates to posts, comments, members, etc., and merge them into the correct group.
-    // For now, we'll listen to the top-level group changes.
     const channel = supabase
       .channel('community-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, handleGroupChanges)
-      // In a real app, you would add more listeners for posts, comments, etc.
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [allUsers]);
 
   return (
     <CommunityContext.Provider value={{ groups }}>
@@ -119,4 +129,3 @@ export const useCommunity = () => {
   }
   return context;
 };
-

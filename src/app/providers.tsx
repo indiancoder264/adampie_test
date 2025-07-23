@@ -19,14 +19,14 @@ type ProviderProps = {
 
 export function Providers({ children, currentUser, users, recipes, groups }: ProviderProps) {
   return (
-    <RecipeProvider initialRecipes={recipes}>
+    <AuthProvider initialUser={currentUser}>
       <AllUsersProvider initialUsers={users}>
-        <CommunityProvider initialGroups={groups}>
-          <AuthProvider initialUser={currentUser}>
+        <RecipeProvider initialRecipes={recipes}>
+          <CommunityProvider initialGroups={groups}>
             {children}
-          </AuthProvider>
-        </CommunityProvider>
+          </CommunityProvider>
+        </RecipeProvider>
       </AllUsersProvider>
-    </RecipeProvider>
+    </AuthProvider>
   );
 }
