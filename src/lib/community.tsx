@@ -71,6 +71,7 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
       const { eventType, new: newRecord, old } = payload;
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
+            if (!newRecord || !newRecord.creator_id) return currentGroups;
             const creator = allUsers.find(u => u.id === newRecord.creator_id);
             const groupToAdd: Group = {
                 id: newRecord.id,
@@ -78,10 +79,14 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
                 description: newRecord.description,
                 creator_id: newRecord.creator_id,
                 created_at: newRecord.created_at,
+                // On creation, the creator is the only member
                 members: [newRecord.creator_id],
+                // New groups have no posts yet
                 posts: [],
+                // Look up the creator name from the existing user list
                 creator_name: creator?.name || 'Unknown User',
             };
+            // Prevent duplicates if a message arrives multiple times
             if (currentGroups.some(g => g.id === groupToAdd.id)) {
                 return currentGroups;
             }
