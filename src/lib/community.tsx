@@ -65,37 +65,44 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
   }, [serverGroups]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !allUsers.length) return;
     
+    const userMap = new Map(allUsers.map(u => [u.id, u.name]));
+
     const handleGroupChanges = (payload: any) => {
       const { eventType, new: newRecord, old } = payload;
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
-            if (!newRecord || !newRecord.creator_id) return currentGroups;
-            const creator = allUsers.find(u => u.id === newRecord.creator_id);
+            // Ensure the new record and its essential fields exist.
+            if (!newRecord || !newRecord.id || !newRecord.creator_id) {
+                return currentGroups;
+            }
+            // Prevent duplicates if a message arrives multiple times.
+            if (currentGroups.some(g => g.id === newRecord.id)) {
+                return currentGroups;
+            }
+
+            // Construct a complete Group object.
+            const creatorName = userMap.get(newRecord.creator_id) || 'Unknown User';
             const groupToAdd: Group = {
                 id: newRecord.id,
                 name: newRecord.name,
                 description: newRecord.description,
                 creator_id: newRecord.creator_id,
                 created_at: newRecord.created_at,
-                // On creation, the creator is the only member
+                // On creation, the creator is the only member.
                 members: [newRecord.creator_id],
-                // New groups have no posts yet
+                // New groups have no posts yet.
                 posts: [],
-                // Look up the creator name from the existing user list
-                creator_name: creator?.name || 'Unknown User',
+                creator_name: creatorName,
             };
-            // Prevent duplicates if a message arrives multiple times
-            if (currentGroups.some(g => g.id === groupToAdd.id)) {
-                return currentGroups;
-            }
             return [...currentGroups, groupToAdd];
         }
         if (eventType === 'UPDATE') {
           return currentGroups.map(group => {
               if (group.id === newRecord.id) {
-                  return { ...group, ...newRecord };
+                  const creatorName = userMap.get(newRecord.creator_id) || group.creator_name;
+                  return { ...group, ...newRecord, creator_name: creatorName };
               }
               return group;
           });
