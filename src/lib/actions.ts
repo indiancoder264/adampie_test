@@ -79,6 +79,47 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
     }
 }
 
+// --- Centralized Authorization Helpers ---
+
+/**
+ * Gets the currently authenticated user from the session cookie.
+ * Throws an error if the user is not authenticated or the session is invalid.
+ * @returns {Promise<User>} The authenticated user object.
+ */
+async function getAuthenticatedUser(): Promise<User> {
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get("session_token")?.value;
+    if (!sessionToken) {
+        throw new Error("Authentication required: No session token found.");
+    }
+
+    const pool = getPool();
+    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
+    if (sessionRes.rows.length === 0) {
+        throw new Error("Authentication required: Invalid or expired session.");
+    }
+
+    const user = await fetchUserById(sessionRes.rows[0].user_id);
+    if (!user) {
+        throw new Error("Authentication required: User not found.");
+    }
+    return user;
+}
+
+
+/**
+ * Gets the currently authenticated user and verifies they are an administrator.
+ * Throws an error if the user is not authenticated or not an admin.
+ * @returns {Promise<User>} The authenticated admin user object.
+ */
+async function getAdminUser(): Promise<User> {
+    const user = await getAuthenticatedUser();
+    if (!user.isAdmin) {
+        throw new Error("Authorization failed: User is not an administrator.");
+    }
+    return user;
+}
+
 
 // --- Auth Actions ---
 export async function loginAction(data: { email: string; password: string;}) {
@@ -388,16 +429,11 @@ function parseIngredient(ingredientString: string): { quantity: string, name: st
 }
 
 export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeFormSchema>, recipeId: string | null) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
+    try {
+        await getAdminUser();
+    } catch (error) {
+        return { success: false, error: (error as Error).message };
+    }
 
     const validation = recipeFormSchema.safeParse(data);
     if (!validation.success) {
@@ -409,6 +445,7 @@ export async function createOrUpdateRecipeAction(data: z.infer<typeof recipeForm
         dietary_type, meal_category, consumption_time, dietary_notes, ingredients, steps
     } = validation.data;
     
+    const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -487,78 +524,48 @@ export async function addOrUpdateTipAction(recipeId: string, tipData: { tip: str
 }
 
 export async function deleteRecipeAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        await client.query('DELETE FROM recipes WHERE id = $1', [recipeId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('DELETE FROM recipes WHERE id = $1', [recipeId]);
         revalidatePath("/admin", "layout");
         revalidatePath("/", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to delete recipe.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete recipe.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function togglePublishAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        await client.query('UPDATE recipes SET published = NOT published WHERE id = $1', [recipeId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('UPDATE recipes SET published = NOT published WHERE id = $1', [recipeId]);
         revalidatePath("/admin", "layout");
         revalidatePath("/", "layout");
         revalidatePath(`/recipes/${recipeId}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to toggle publish status.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to toggle publish status.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function deleteTipAction(recipeId: string, tipId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-  
-    const client = await pool.connect();
     try {
-        await client.query('DELETE FROM tips WHERE id = $1', [tipId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('DELETE FROM tips WHERE id = $1', [tipId]);
         revalidatePath("/admin");
         revalidatePath(`/recipes/${recipeId}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to delete tip.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete tip.';
+        return { success: false, error: errorMessage };
     }
 }
 
@@ -593,78 +600,56 @@ export async function createGroupAction(data: { name: string; description: strin
 }
 
 export async function deleteGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const client = await pool.connect();
-    const sessionRes = await client.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-  
     try {
-        const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
-        if (groupRes.rows.length === 0) return { success: false, error: "Group not found." };
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
         
-        const isCreator = groupRes.rows[0].creator_id === user.id;
-        if (!user.isAdmin && !isCreator) {
+        // Admins can delete any group. Creators can delete their own group.
+        const result = await pool.query(
+            'DELETE FROM groups WHERE id = $1 AND ($2 OR creator_id = $3) RETURNING id',
+            [groupId, user.isAdmin, user.id]
+        );
+
+        if (result.rowCount === 0) {
             return { success: false, error: "Unauthorized. You are not the creator or an admin." };
         }
 
-        await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
         revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to delete group." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete group.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function editGroupAction(groupId: string, data: { name: string, description: string }) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        const groupRes = await client.query('SELECT creator_id FROM groups WHERE id = $1', [groupId]);
-        if (groupRes.rows.length === 0 || groupRes.rows[0].creator_id !== user.id) return { success: false, error: "You do not have permission to edit this group." };
-        await client.query('UPDATE groups SET name = $1, description = $2 WHERE id = $3', [data.name, data.description, groupId]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const result = await pool.query(
+            'UPDATE groups SET name = $1, description = $2 WHERE id = $3 AND creator_id = $4 RETURNING id',
+            [data.name, data.description, groupId, user.id]
+        );
+
+        if (result.rowCount === 0) {
+            return { success: false, error: "You do not have permission to edit this group." };
+        }
         revalidatePath(`/community`, 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to edit group." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to edit group.';
+        return { success: false, error: errorMessage };
     }
 }
 
 // --- Community Content Actions ---
 export async function addPostAction(groupId: string, content: string, recipeId?: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-    
-    const client = await pool.connect();
     try {
-        await client.query(
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        await pool.query(
             'INSERT INTO posts (group_id, author_id, content, shared_recipe_id) VALUES ($1, $2, $3, $4)',
             [groupId, user.id, content, recipeId || null]
         );
@@ -672,160 +657,135 @@ export async function addPostAction(groupId: string, content: string, recipeId?:
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to add post." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to add post.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function editPostAction(postId: string, content: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        const postRes = await client.query('SELECT author_id, group_id FROM posts WHERE id = $1', [postId]);
-        if (postRes.rows.length === 0 || postRes.rows[0].author_id !== user.id) return { success: false, error: "You don't have permission to edit this post." };
-        await client.query('UPDATE posts SET content = $1, updated_at = NOW() WHERE id = $2', [content, postId]);
-        revalidatePath(`/community/${postRes.rows[0].group_id}`);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const result = await pool.query(
+            'UPDATE posts SET content = $1, updated_at = NOW() WHERE id = $2 AND author_id = $3 RETURNING group_id',
+            [content, postId, user.id]
+        );
+        
+        if (result.rowCount === 0) {
+            return { success: false, error: "You don't have permission to edit this post." };
+        }
+        revalidatePath(`/community/${result.rows[0].group_id}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to edit post." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to edit post.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function deletePostAction(postId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        const postRes = await client.query('SELECT author_id, group_id FROM posts WHERE id = $1', [postId]);
-        const isAuthor = postRes.rows[0]?.author_id === user.id;
-        if (!user.isAdmin && !isAuthor) return { success: false, error: "You don't have permission to delete this post." };
-        await client.query('DELETE FROM posts WHERE id = $1', [postId]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const postRes = await pool.query('SELECT author_id, group_id FROM posts WHERE id = $1', [postId]);
+        if (postRes.rows.length === 0) {
+            return { success: false, error: "Post not found." };
+        }
+
+        const isAuthor = postRes.rows[0].author_id === user.id;
+        if (!user.isAdmin && !isAuthor) {
+            return { success: false, error: "You don't have permission to delete this post." };
+        }
+
+        await pool.query('DELETE FROM posts WHERE id = $1', [postId]);
         revalidatePath(`/community/${postRes.rows[0].group_id}`);
         revalidatePath('/admin', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to delete post." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete post.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function addCommentAction(postId: string, content: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-
-    const client = await pool.connect();
     try {
-        const postRes = await client.query('SELECT group_id FROM posts WHERE id = $1', [postId]);
-        if (postRes.rows.length === 0) return { success: false, error: "Post not found." };
-        await client.query('INSERT INTO comments (post_id, author_id, content) VALUES ($1, $2, $3)', [postId, user.id, content]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const postRes = await pool.query('SELECT group_id FROM posts WHERE id = $1', [postId]);
+        if (postRes.rows.length === 0) {
+            return { success: false, error: "Post not found." };
+        }
+        await pool.query('INSERT INTO comments (post_id, author_id, content) VALUES ($1, $2, $3)', [postId, user.id, content]);
         revalidatePath(`/community/${postRes.rows[0].group_id}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to add comment." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to add comment.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function editCommentAction(commentId: string, content: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        const commentRes = await client.query('SELECT c.author_id, p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [commentId]);
-        if (commentRes.rows.length === 0 || commentRes.rows[0].author_id !== user.id) return { success: false, error: "You don't have permission to edit this comment." };
-        await client.query('UPDATE comments SET content = $1, updated_at = NOW() WHERE id = $2', [content, commentId]);
-        revalidatePath(`/community/${commentRes.rows[0].group_id}`);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const result = await pool.query(
+            `UPDATE comments SET content = $1, updated_at = NOW() 
+             FROM posts 
+             WHERE comments.post_id = posts.id AND comments.id = $2 AND comments.author_id = $3 
+             RETURNING posts.group_id`,
+            [content, commentId, user.id]
+        );
+        
+        if (result.rowCount === 0) {
+            return { success: false, error: "You don't have permission to edit this comment." };
+        }
+        revalidatePath(`/community/${result.rows[0].group_id}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to edit comment." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to edit comment.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function deleteCommentAction(commentId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-    const client = await pool.connect();
     try {
-        const commentRes = await client.query('SELECT c.author_id, p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [commentId]);
-        const isAuthor = commentRes.rows[0]?.author_id === user.id;
-        if (!user.isAdmin && !isAuthor) return { success: false, error: "You don't have permission to delete this comment." };
-        await client.query('DELETE FROM comments WHERE id = $1', [commentId]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const commentRes = await pool.query('SELECT c.author_id, p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [commentId]);
+        if(commentRes.rows.length === 0) {
+            return { success: false, error: "Comment not found."};
+        }
+        
+        const isAuthor = commentRes.rows[0].author_id === user.id;
+        if (!user.isAdmin && !isAuthor) {
+            return { success: false, error: "You don't have permission to delete this comment." };
+        }
+
+        await pool.query('DELETE FROM comments WHERE id = $1', [commentId]);
         revalidatePath(`/community/${commentRes.rows[0].group_id}`);
         revalidatePath('/admin', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to delete comment." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete comment.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function togglePostReactionAction(postId: string, reaction: 'like' | 'dislike') {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
+    const user = await getAuthenticatedUser();
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const postRes = await client.query('SELECT group_id FROM posts WHERE id = $1', [postId]);
-        if (postRes.rows.length === 0) return { success: false, error: "Post not found." };
+        if (postRes.rows.length === 0) {
+             await client.query('ROLLBACK');
+             return { success: false, error: "Post not found." };
+        }
         
         const existingReaction = await client.query('SELECT reaction FROM post_reactions WHERE user_id = $1 AND post_id = $2', [user.id, postId]);
         if (existingReaction.rows.length > 0) {
@@ -843,196 +803,122 @@ export async function togglePostReactionAction(postId: string, reaction: 'like' 
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(error);
-        return { success: false, error: "Failed to react to post." };
+        const errorMessage = error instanceof Error ? error.message : 'Failed to react to post.';
+        return { success: false, error: errorMessage };
     } finally {
         client.release();
     }
 }
 
 export async function reportContentAction(contentId: string, contentType: 'post' | 'comment', reason: string, details?: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-    const client = await pool.connect();
     try {
-        const postRes = await client.query(contentType === 'post' ? 'SELECT group_id FROM posts WHERE id = $1' : 'SELECT p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [contentId]);
-        if (postRes.rows.length === 0) return { success: false, error: "Content not found." };
-        await client.query('INSERT INTO reports (reporter_id, content_id, content_type, reason, details) VALUES ($1, $2, $3, $4, $5)', [user.id, contentId, contentType, reason, details]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const postRes = await pool.query(contentType === 'post' ? 'SELECT group_id FROM posts WHERE id = $1' : 'SELECT p.group_id FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.id = $1', [contentId]);
+        if (postRes.rows.length === 0) {
+            return { success: false, error: "Content not found." };
+        }
+        await pool.query('INSERT INTO reports (reporter_id, content_id, content_type, reason, details) VALUES ($1, $2, $3, $4, $5)', [user.id, contentId, contentType, reason, details]);
         revalidatePath(`/community/${postRes.rows[0].group_id}`);
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to submit report." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to submit report.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function dismissReportAction(contentId: string, contentType: 'post' | 'comment') {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-  
-    const client = await pool.connect();
     try {
-        await client.query('UPDATE reports SET is_dismissed = TRUE WHERE content_id = $1 AND content_type = $2', [contentId, contentType]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('UPDATE reports SET is_dismissed = TRUE WHERE content_id = $1 AND content_type = $2', [contentId, contentType]);
         revalidatePath('/admin', 'layout');
         return { success: true };
     } catch (error) {
         console.error("Error dismissing report:", error);
-        return { success: false, error: 'Failed to dismiss report.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to dismiss report.';
+        return { success: false, error: errorMessage };
     }
 }
 
 
 // --- User Actions ---
 export async function deleteUserAction(userId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-  
-    const client = await pool.connect();
     try {
-        await client.query('DELETE FROM users WHERE id = $1', [userId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
         revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to delete user.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete user.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function suspendUserAction(userId: string, days: number) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
-        await client.query('UPDATE users SET suspended_until = NOW() + ($1 * INTERVAL \'1 day\') WHERE id = $2', [days, userId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('UPDATE users SET suspended_until = NOW() + ($1 * INTERVAL \'1 day\') WHERE id = $2', [days, userId]);
         revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to suspend user.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to suspend user.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function unsuspendUserAction(userId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user?.isAdmin) return { success: false, error: "Unauthorized" };
-    
-    const client = await pool.connect();
     try {
-        await client.query('UPDATE users SET suspended_until = NULL WHERE id = $1', [userId]);
+        await getAdminUser();
+        const pool = getPool();
+        await pool.query('UPDATE users SET suspended_until = NULL WHERE id = $1', [userId]);
         revalidatePath("/admin", "layout");
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: 'Failed to unsuspend user.' };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to unsuspend user.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function joinGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-    
-    const client = await pool.connect();
     try {
-        await client.query('INSERT INTO group_members (user_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [user.id, groupId]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        await pool.query('INSERT INTO group_members (user_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [user.id, groupId]);
         revalidatePath(`/community/${groupId}`);
         revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to join group." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to join group.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function leaveGroupAction(groupId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-    
-    const client = await pool.connect();
     try {
-        await client.query('DELETE FROM group_members WHERE user_id = $1 AND group_id = $2', [user.id, groupId]);
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        await pool.query('DELETE FROM group_members WHERE user_id = $1 AND group_id = $2', [user.id, groupId]);
         revalidatePath(`/community/${groupId}`);
         revalidatePath('/community', 'layout');
         return { success: true };
     } catch (error) {
         console.error(error);
-        return { success: false, error: "Failed to leave group." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Failed to leave group.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function requestEmailChangeAction(newEmail: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
+    const user = await getAuthenticatedUser();
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "You must be logged in." };
-  
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1081,7 +967,8 @@ export async function requestEmailChangeAction(newEmail: string) {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Error requesting email change:", error);
-        return { success: false, error: "An error occurred. Please try again." };
+        const errorMessage = error instanceof Error ? error.message : 'An error occurred. Please try again.';
+        return { success: false, error: errorMessage };
     } finally {
         client.release();
     }
@@ -1089,16 +976,8 @@ export async function requestEmailChangeAction(newEmail: string) {
 
 
 export async function updateUserAction(data: Partial<Pick<User, 'name' | 'country' | 'dietaryPreference'>>, otp?: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
+    const user = await getAuthenticatedUser();
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-    
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1172,16 +1051,8 @@ export async function updateUserAction(data: Partial<Pick<User, 'name' | 'countr
 }
 
 export async function changePasswordAction(data: {currentPassword: string, newPassword: string}) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
+    const user = await getAuthenticatedUser();
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -1236,25 +1107,18 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(error);
-        return { success: false, error: "An unexpected error occurred." };
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred.';
+        return { success: false, error: errorMessage };
     } finally {
         client.release();
     }
 }
 
 export async function updateFavoriteCuisinesAction(cuisines: string[]) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, error: "Unauthorized" };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, error: "Unauthorized" };
-
-    const client = await pool.connect();
     try {
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
+        const client = await pool.connect();
         await client.query('BEGIN');
         await client.query('DELETE FROM user_favorite_cuisines WHERE user_id = $1', [user.id]);
         if (cuisines.length > 0) {
@@ -1264,29 +1128,20 @@ export async function updateFavoriteCuisinesAction(cuisines: string[]) {
             await client.query(queryText, queryValues);
         }
         await client.query('COMMIT');
+        client.release();
         revalidatePath('/profile');
         revalidatePath('/', 'layout');
         return { success: true };
     } catch (error) {
-        await client.query('ROLLBACK');
         console.error("Error updating favorite cuisines:", error);
-        return { success: false, error: "Database error occurred." };
-    } finally {
-        client.release();
+        const errorMessage = error instanceof Error ? error.message : 'Database error occurred.';
+        return { success: false, error: errorMessage };
     }
 }
 
 export async function toggleFavoriteAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false, isFavorite: false, error: "Unauthorized" };
-    
+    const user = await getAuthenticatedUser();
     const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false, isFavorite: false, error: "Unauthorized" };
-    const user = await fetchUserById(sessionRes.rows[0].user_id);
-    if (!user) return { success: false, isFavorite: false, error: "Unauthorized" };
-
     const client = await pool.connect();
     let isCurrentlyFavorite = user.favorites.includes(recipeId);
 
@@ -1308,31 +1163,27 @@ export async function toggleFavoriteAction(recipeId: string) {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Error toggling favorite:", error);
-        return { success: false, isFavorite: isCurrentlyFavorite, error: "Database error occurred." };
+        const errorMessage = error instanceof Error ? error.message : 'Database error occurred.';
+        return { success: false, isFavorite: isCurrentlyFavorite, error: errorMessage };
     } finally {
         client.release();
     }
 }
 
 export async function logRecipeViewAction(recipeId: string) {
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get("session_token")?.value;
-    if (!sessionToken) return { success: false };
-    
-    const pool = getPool();
-    const sessionRes = await pool.query('SELECT user_id FROM sessions WHERE id = $1 AND expires_at > NOW()', [sessionToken]);
-    if(sessionRes.rows.length === 0) return { success: false };
-    const userId = sessionRes.rows[0].user_id;
-
     try {
+        const user = await getAuthenticatedUser();
+        const pool = getPool();
         await pool.query(
             `UPDATE users 
              SET read_history = read_history || $1::uuid 
              WHERE id = $2 AND NOT (read_history @> ARRAY[$1::uuid])`,
-            [recipeId, userId]
+            [recipeId, user.id]
         );
         return { success: true };
     } catch (error) {
+        // This is a non-critical action, so we don't need to show an error to the user.
+        // We log it on the server for debugging.
         console.error("Error logging recipe view:", error);
         return { success: false };
     }

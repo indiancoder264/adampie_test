@@ -71,46 +71,46 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
 
     const handleGroupChanges = (payload: any) => {
       const { eventType, new: newRecord, old } = payload;
+
       setGroups(currentGroups => {
         if (eventType === 'INSERT') {
-            // Ensure the new record and its essential fields exist.
-            if (!newRecord || !newRecord.id || !newRecord.creator_id) {
-                return currentGroups;
-            }
-            // Prevent duplicates if a message arrives multiple times.
-            if (currentGroups.some(g => g.id === newRecord.id)) {
-                return currentGroups;
-            }
+          // Ensure we have a valid new record and it's not already in our state
+          if (!newRecord || !newRecord.id || currentGroups.some(g => g.id === newRecord.id)) {
+            return currentGroups;
+          }
+          
+          // Construct a complete, valid Group object for the UI
+          const creatorName = userMap.get(newRecord.creator_id) || 'Unknown User';
+          const newFullGroup: Group = {
+            id: newRecord.id,
+            name: newRecord.name || 'New Group',
+            description: newRecord.description || '',
+            creator_id: newRecord.creator_id,
+            created_at: newRecord.created_at,
+            creator_name: creatorName,
+            members: [newRecord.creator_id], // The creator is the first member
+            posts: [], // New groups have no posts
+          };
 
-            // Construct a complete Group object.
-            const creatorName = userMap.get(newRecord.creator_id) || 'Unknown User';
-            const groupToAdd: Group = {
-                id: newRecord.id,
-                name: newRecord.name,
-                description: newRecord.description,
-                creator_id: newRecord.creator_id,
-                created_at: newRecord.created_at,
-                // On creation, the creator is the only member.
-                members: [newRecord.creator_id],
-                // New groups have no posts yet.
-                posts: [],
-                creator_name: creatorName,
-            };
-            return [...currentGroups, groupToAdd];
+          return [...currentGroups, newFullGroup];
         }
+
         if (eventType === 'UPDATE') {
           return currentGroups.map(group => {
-              if (group.id === newRecord.id) {
-                  const creatorName = userMap.get(newRecord.creator_id) || group.creator_name;
-                  return { ...group, ...newRecord, creator_name: creatorName };
-              }
-              return group;
+            if (group.id === newRecord.id) {
+              // Merge existing data with new data to prevent overwriting nested arrays
+              return { ...group, ...newRecord };
+            }
+            return group;
           });
         }
+        
         if (eventType === 'DELETE') {
+          // Ensure old.id exists before filtering
           if (!old || !old.id) return currentGroups;
           return currentGroups.filter(group => group.id !== old.id);
         }
+
         return currentGroups;
       });
     };
