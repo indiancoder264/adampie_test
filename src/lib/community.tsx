@@ -121,7 +121,9 @@ export const CommunityProvider = ({ children, initialGroups: serverGroups }: { c
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [allUsers]);
 
