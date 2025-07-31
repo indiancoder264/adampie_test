@@ -690,8 +690,10 @@ export default function GroupDetailPage() {
       .subscribe();
       
     return () => {
-      supabase.removeChannel(postsChannel);
-      supabase.removeChannel(commentsChannel);
+      if (supabase) {
+        supabase.removeChannel(postsChannel);
+        supabase.removeChannel(commentsChannel);
+      }
     };
 
   }, [params.id, allUsers]);
