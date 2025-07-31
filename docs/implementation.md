@@ -1,4 +1,3 @@
-
 # RecipeRadar - Page Implementation Details
 
 This document provides a technical breakdown of each page in the RecipeRadar application, detailing the technologies used, data sources, and key functionalities.

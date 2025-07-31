@@ -63,8 +63,6 @@ export const RecipeProvider = ({ children, initialRecipes: serverRecipes }: { ch
   }, [serverRecipes]);
 
   useEffect(() => {
-    if (!supabase) return;
-    
     const handleRecipeChanges = (payload: any) => {
         const { eventType, new: newRecord, old } = payload;
         setRecipes(currentRecipes => {

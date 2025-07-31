@@ -24,7 +24,6 @@ A complete, executable SQL script is available at `database/schema.sql`.
 13. [Comments](#13-comments)
 14. [Post Reactions (Junction Table)](#14-post-reactions)
 15. [Reports](#15-reports)
-16. [Rate Limits](#16-rate-limits)
 
 
 ---
@@ -147,15 +146,13 @@ CREATE TRIGGER update_users_modtime
 
 ### 3. `sessions`
 
-Stores stateful session data, allowing for server-side session invalidation. Includes user agent and IP address for security analysis.
+Stores stateful session data, allowing for server-side session invalidation.
 
 ```sql
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
-    user_agent TEXT,
-    ip_address VARCHAR(45),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -414,20 +411,4 @@ CREATE TABLE reports (
 
 -- Index to find all reports for a specific piece of content
 CREATE INDEX idx_reports_content ON reports(content_type, content_id);
-```
-
-### 16. `rate_limits`
-
-Stores records of actions performed by IP addresses for rate limiting purposes.
-
-```sql
-CREATE TABLE rate_limits (
-    id SERIAL PRIMARY KEY,
-    ip_address VARCHAR(45) NOT NULL,
-    action_type VARCHAR(50) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-
--- Index for efficient querying of recent actions by IP and type
-CREATE INDEX idx_rate_limits_ip_action_time ON rate_limits (ip_address, action_type, created_at);
 ```

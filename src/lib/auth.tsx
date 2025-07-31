@@ -44,7 +44,7 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
   }, [initialUser]);
 
   useEffect(() => {
-    if (!initialUser || !supabase) return;
+    if (!initialUser) return;
 
     const channel = supabase
       .channel('user-updates')

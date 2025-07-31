@@ -5,16 +5,10 @@ This document outlines the file and folder structure for the RecipeRadar applica
 
 ```
 /
-├── .env                  # Environment variables (POSTGRES_URL, RESEND_API_KEY, etc.)
+├── .env                  # Environment variables (DATABASE_URL, etc.)
 ├── .vscode/
 │   └── settings.json     # VSCode editor settings
-├── database/
-│   └── schema.sql        # Executable SQL script to set up the entire database
 ├── docs/
-│   ├── setup/
-│   │   ├── RESEND_SETUP.md       # Guide for connecting the Resend email provider
-│   │   ├── SUPABASE_SETUP.md     # Guide for connecting to a Supabase database
-│   │   └── VERCEL_DEPLOYMENT.md  # Guide for deploying the application to Vercel
 │   ├── APP_GUIDE.md      # Detailed application architecture and feature guide
 │   ├── DATABASE_SCHEMA.md # PostgreSQL database schema design
 │   └── FILE_STRUCTURE.md # This file, outlining the project structure
@@ -57,11 +51,11 @@ This document outlines the file and folder structure for the RecipeRadar applica
     │   │       └── page.tsx # Recipe detail page (Server Component)
     │   ├── signup/
     │   │   └── page.tsx  # Signup page (Client Component using a Server Action)
-    │   ├── sitemap.ts      # Dynamically generates sitemap.xml on build
+    │   ├── sitemap.ts      # Dynamically generates sitemap.xml
     │   ├── terms/
     │   │   └── page.tsx  # Terms of Service page
     │   └── verify-otp/
-    │       └── page.tsx  # Page that handles the email verification OTP
+    │       └── page.tsx # Page that handles the email verification OTP
     ├── components/         # Reusable React components
     │   ├── admin/          # Components used only on the Admin Dashboard
     │   ├── layout/         # Components for the overall site layout (Header, Footer)
@@ -82,4 +76,5 @@ This document outlines the file and folder structure for the RecipeRadar applica
         ├── recipes.tsx     # Recipes Context provider
         ├── users.tsx       # Users Context provider
         └── utils.ts        # Utility functions (e.g., cn for Tailwind classes)
+
 ```

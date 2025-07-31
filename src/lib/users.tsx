@@ -21,8 +21,6 @@ export const AllUsersProvider = ({ children, initialUsers: serverUsers }: { chil
   }, [serverUsers]);
 
   useEffect(() => {
-    if (!supabase) return;
-    
     const handleUserChanges = (payload: any) => {
       const { eventType, new: newRecord, old } = payload;
       setAllUsers(currentUsers => {

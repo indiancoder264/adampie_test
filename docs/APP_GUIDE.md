@@ -1,4 +1,3 @@
-
 # RecipeRadar Application Guide
 
 This document provides a detailed walkthrough of the RecipeRadar web application, its architecture, key functionalities, and file structure.
@@ -19,8 +18,7 @@ RecipeRadar is a feature-rich web application for discovering, sharing, and disc
 -   **TypeScript:** Adds static typing to JavaScript for improved code quality and robustness.
 -   **Tailwind CSS:** A utility-first CSS framework for rapid UI development.
 -   **ShadCN UI:** A collection of beautifully designed, accessible, and reusable UI components built on top of Tailwind CSS.
--   **PostgreSQL:** The application's relational database, managed via the `pg` library. The complete schema is designed for scalability and documented in `docs/DATABASE_SCHEMA.md`.
--   **Resend:** Used as the email provider for sending OTP verification emails during user signup.
+-   **PostgreSQL:** The application's relational database, managed via the `pg` library. The complete schema is designed for scalability and can be found in `docs/DATABASE_SCHEMA.md`.
 
 ---
 
@@ -43,13 +41,11 @@ While most data is handled on the server, some global client-side state is manag
 
 ---
 
-## 3. Data Source & Setup
+## 3. Data Source
 
 The application is powered by a **PostgreSQL database**. All data fetching is centralized in `src/lib/data.ts`, and all data mutations are handled by server actions in `src/lib/actions.ts`. The connection to the database is configured in `src/lib/db.ts` and relies on the `POSTGRES_URL` environment variable.
 
 The complete database schema, including tables, columns, and relationships, is documented in `docs/DATABASE_SCHEMA.md`.
-
-For a quick setup, an executable SQL script is available at `database/schema.sql`. This script can be run directly in a PostgreSQL client (like the Supabase SQL Editor) to create all the necessary tables and functions.
 
 ---
 
@@ -57,18 +53,17 @@ For a quick setup, an executable SQL script is available at `database/schema.sql
 
 The application uses the Next.js App Router, where each folder in `src/app/` corresponds to a URL path.
 
-| Page / Feature                | File Location                               | Description                                                                                                                                                                                            |
-| ----------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Homepage**                  | `src/app/page.tsx`                          | The main landing page. As a Server Component, it pre-renders a hero section, search bar, and carousels of trending and regional recipes. For logged-in users, it displays a personalized "Recommended For You" section based on their preferences. |
-| **Recipe Detail Page**        | `src/app/recipes/[id]/page.tsx`             | A Server Component that pre-renders all recipe details. Interactive elements like the "Favorite" button, a "Share to Community" feature, and the step-by-step cooking guide are handled by client components.  |
-| **User Profile**              | `src/app/profile/page.tsx`                  | A client-side page allowing a logged-in user to view and edit their profile, see their favorite recipes, manage preferred cuisines, and track their community activity and earned achievements. |
-| **Cuisine-Specific Page**     | `src/app/cuisine/[region]/page.tsx`         | A page that lists all recipes for a specific cuisine. The list of recipes is fetched and rendered on the server.                                                                                       |
-| **Login & Signup**            | `src/app/login/page.tsx` & `signup/page.tsx`| Secure forms that use Server Actions (`loginAction`, `signupAction`) to handle authentication against the database. Signup initiates an OTP email verification process.                                    |
-| **Verify OTP**                | `src/app/verify-otp/page.tsx`               | A page where new users enter the 6-digit One-Time Password sent to their email to complete the registration process and verify their account.                                                        |
-| **Community Hub**             | `src/app/community/page.tsx`                | The main entry point for the community section. It displays a tabbed interface for a logged-in user to see groups they've created, groups they are a member of, and to explore all other available groups. |
-| **Group Detail Page**         | `src/app/community/[id]/page.tsx`           | The discussion board for a single group. All interactions (creating posts, sharing recipes, commenting, reacting, reporting) are handled by secure Server Actions that update the database in real-time.                             |
-| **Admin Dashboard**           | `src/app/admin/page.tsx`                    | A protected page for administrators. Login is handled via special environment variables. All functions—managing recipes, moderating users, viewing analytics, and overseeing community groups—are directly connected to the database via server actions.     |
-| **Sitemap**                   | `src/app/sitemap.ts`                        | A special file that dynamically generates a `sitemap.xml` file by fetching all published recipes and groups from the database, ensuring search engines can efficiently index the entire site.           |
+| Page / Feature            | File Location                               | Description                                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Homepage**              | `src/app/page.tsx`                          | The main landing page. As a Server Component, it pre-renders a hero section, search bar, and carousels of trending and regional recipes. For logged-in users, it displays a personalized "Recommended For You" section based on their preferences. |
+| **Recipe Detail Page**    | `src/app/recipes/[id]/page.tsx`             | A Server Component that pre-renders all recipe details, including ingredients and steps. Interactive elements like the "Favorite" button, a "Share to Community" feature, and the step-by-step cooking guide are handled by client components.  |
+| **User Profile**          | `src/app/profile/page.tsx`                  | A client-side page allowing a logged-in user to view and edit their profile, see their favorite recipes, manage preferred cuisines, and track their community activity and earned achievements. |
+| **Cuisine-Specific Page** | `src/app/cuisine/[region]/page.tsx`         | A page that lists all recipes for a specific cuisine. The list of recipes is fetched and rendered on the server.                                                                                       |
+| **Login & Signup**        | `src/app/login/page.tsx` & `signup/page.tsx`| Secure forms that use Server Actions (`loginAction`, `signupAction`) to handle authentication against the database, including password hashing with `bcryptjs`.                                         |
+| **Community Hub**         | `src/app/community/page.tsx`                | The main entry point for the community section. It displays a tabbed interface for a logged-in user to see groups they've created, groups they are a member of, and to explore all other available groups. |
+| **Group Detail Page**     | `src/app/community/[id]/page.tsx`           | The discussion board for a single group. All interactions (creating posts, sharing recipes, commenting, reacting) are handled by secure Server Actions that update the database in real-time.                             |
+| **Admin Dashboard**       | `src/app/admin/page.tsx`                    | A protected page for administrators. All functions—managing recipes, moderating users, viewing analytics, and overseeing community groups—are directly connected to the database via server actions.     |
+| **Sitemap**               | `src/app/sitemap.ts`                        | A special file that dynamically generates a `sitemap.xml` file by fetching all published recipes and groups from the database, ensuring search engines can efficiently index the entire site.           |
 
 ---
 
