@@ -9,18 +9,18 @@ This document provides a technical breakdown of each page in the RecipeRadar app
 
 -   **File:** `src/app/page.tsx`
 -   **Technique:**
-    -   This page is a **Client Component** (`"use client"`) that wraps server-fetched data.
+    -   This is a **Client Component** (`"use client"`) that consumes data provided by server-fetched contexts.
     -   It uses React Hooks (`useState`, `useEffect`, `useMemo`) to manage the display of recipes based on user state and search parameters.
-    -   The initial data for all recipes is fetched on the server in `src/app/layout.tsx` and provided via React Context (`useRecipes`, `useAuth`).
+    -   The `Suspense` boundary ensures a smooth loading experience, showing a skeleton UI while data is being prepared.
 -   **Data Fetching:**
     -   **Reads from:** `recipes`, `users` (for personalization), `user_favorites`.
-    -   The data is pre-fetched on the server via the `fetchRecipes()` function in `src/lib/data.ts`.
+    -   All initial data is fetched on the server in `src/app/layout.tsx` and provided via React Context (`useRecipes`, `useAuth`).
 -   **Functions Offered:**
     -   Displays a hero banner with a search and filter component.
-    -   Shows a "Recommended For You" carousel for logged-in users, personalized based on their favorite cuisines, dietary preferences, and read history.
+    -   Shows a "Recommended For You" carousel for logged-in users, personalized based on their favorite cuisines and dietary preferences.
     -   Displays a "Worldwide Trending" carousel based on recipe favorite counts.
-    -   Renders sections for different cuisine types, with links to view all recipes for that cuisine.
-    -   If search parameters are present in the URL, it displays a search results view instead of the default homepage content.
+    -   Renders sections for different cuisine types with links to view all recipes for that region.
+    -   If search parameters are present in the URL, it displays a dedicated search results view.
 
 ---
 
@@ -34,7 +34,7 @@ This document provides a technical breakdown of each page in the RecipeRadar app
     -   Leverages **Server Actions** (`logRecipeViewAction`, `addPostAction`) for background tasks and sharing to the community.
 -   **Data Fetching:**
     -   **Reads from:** `recipes`, `ingredients`, `steps`, `tips`, `users`, `groups`.
-    -   The core data is provided via the `useRecipes` and `useCommunity` contexts.
+    -   The core recipe data is provided via the `useRecipes` context, which is populated on the server.
 -   **Functions Offered:**
     -   Displays all recipe details: description, prep/cook times, servings, dietary info, ingredients, and steps.
     -   Allows users to favorite/unfavorite the recipe.
@@ -48,9 +48,9 @@ This document provides a technical breakdown of each page in the RecipeRadar app
 
 -   **File:** `src/app/profile/page.tsx`
 -   **Technique:**
-    -   A **Client Component** that heavily relies on React hooks (`useState`, `useEffect`, `useMemo`).
-    -   Uses `react-hook-form` for robust form validation for password changes and profile updates.
-    -   All data mutations are handled by **Server Actions** (`updateUserAction`, `changePasswordAction`, `updateFavoriteCuisinesAction`, `requestEmailChangeAction`).
+    -   A **Client Component** that relies on React hooks (`useState`, `useEffect`).
+    -   Uses `react-hook-form` and `zod` for robust form validation for password changes and profile updates.
+    -   All data mutations are handled by **Server Actions** which include centralized authorization checks (e.g., `updateUserAction`, `changePasswordAction`, `requestEmailChangeAction`).
 -   **Data Fetching:**
     -   **Reads from:** `users`, `recipes`, `user_favorites`, `user_favorite_cuisines`, `groups`, `tips`.
     -   Relies entirely on the client-side `useAuth`, `useRecipes`, and `useCommunity` contexts for its data.
@@ -70,14 +70,14 @@ This document provides a technical breakdown of each page in the RecipeRadar app
 -   **File:** `src/app/community/page.tsx`
 -   **Technique:**
     -   A **Client Component** that uses a tabbed interface (`Tabs` from ShadCN) to organize groups.
-    -   Uses React hooks (`useState`, `useMemo`) to filter and display groups based on the logged-in user's membership and creator status.
-    -   Leverages **Server Actions** (`joinGroupAction`, `leaveGroupAction`, `deleteGroupAction`, `editGroupAction`) for all group interactions.
+    -   Uses `react-hook-form` and `zod` for the "Edit Group" dialog.
+    -   Relies on the `useCommunity` context, which uses a **Supabase Realtime** subscription to keep the list of groups synchronized across all clients.
+    -   Leverages secure **Server Actions** (`joinGroupAction`, `leaveGroupAction`, `deleteGroupAction`, `editGroupAction`) for all group interactions, which use centralized authorization helpers.
 -   **Data Fetching:**
     -   **Reads from:** `groups`, `group_members`, `users`.
-    -   Data is provided via the `useCommunity` and `useAuth` contexts.
+    -   Initial data is provided via the `useCommunity` and `useAuth` contexts, which are populated on the server. Real-time updates for new or deleted groups are handled by the `CommunityProvider`.
 -   **Functions Offered:**
     -   For logged-in users, displays three tabs: "My Groups" (created by the user), "Groups I'm In", and "Explore".
-    -   For logged-out users, displays a single list of all available groups.
     -   Allows users to join or leave groups.
     -   Allows group creators to edit or delete their own groups.
     -   Provides a link to the "Create Group" page.
@@ -88,21 +88,18 @@ This document provides a technical breakdown of each page in the RecipeRadar app
 
 -   **File:** `src/app/community/[id]/page.tsx`
 -   **Technique:**
-    -   A complex **Client Component** that manages the entire lifecycle of a group discussion.
+    -   A complex **Client Component** that manages the entire lifecycle of a group discussion board.
+    -   This component contains its own dedicated **Supabase Realtime** listeners for `posts` and `comments` to ensure that all interactions within the group are reflected instantly for all members. This localized approach is more robust and efficient.
     -   Uses `react-hook-form` for post and comment submission.
-    -   Manages local state for dialogs (editing, reporting) and filters.
-    -   All interactions are handled by **Server Actions** (`addPostAction`, `deletePostAction`, `addCommentAction`, `deleteCommentAction`, `togglePostReactionAction`, `reportContentAction`, etc.).
+    -   All interactions (posting, commenting, reacting, reporting) are handled by secure **Server Actions** with centralized authorization checks via `getAuthenticatedUser()`.
 -   **Data Fetching:**
     -   **Reads from:** `groups`, `posts`, `comments`, `post_reactions`, `users`, `reports`.
-    -   Data is supplied by the `useCommunity` and `useAuth` contexts.
+    -   Initial data is supplied by the `useCommunity` and `useAuth` contexts. Real-time updates for posts and comments are handled locally within this component.
 -   **Functions Offered:**
     -   Displays group name, description, and member list.
-    -   Allows members to create new posts.
-    -   Displays posts, including shared recipes, with author details and timestamps.
-    -   Allows users to react (like/dislike) to posts.
-    -   Allows users to comment on posts.
+    -   Allows members to create new posts (including sharing recipes).
+    -   Allows users to react (like/dislike) to posts, comment on posts, and report inappropriate content.
     -   Provides editing and deletion capabilities for a user's own posts and comments.
-    -   Enables users to report inappropriate posts or comments.
 
 ---
 
@@ -112,31 +109,31 @@ This document provides a technical breakdown of each page in the RecipeRadar app
 -   **Technique:**
     -   A **Client Component** that serves as an orchestrator for various admin-focused sub-components.
     -   Uses ShadCN `Tabs` to separate different management areas (Recipes, Tips, Community, Users, Analytics).
-    -   Uses a server-side `redirect` check to enforce admin-only access before the page is rendered.
-    -   All data manipulation is done via secure **Server Actions** (e.g., `createOrUpdateRecipeAction`, `deleteUserAction`, `suspendUserAction`).
+    -   Access is protected by a server-side redirect that checks for admin status via the `useAuth` hook before rendering.
+    -   All data manipulation is done via secure **Server Actions** that use the centralized `getAdminUser()` authorization check, ensuring only admins can perform these operations.
 -   **Data Fetching:**
-    -   **Reads from:** All tables in the database (`users`, `recipes`, `tips`, `groups`, `posts`, `comments`, `reports`).
+    -   **Reads from:** All tables in the database.
     -   Initial data is provided via the client-side contexts, which are populated on the server in `layout.tsx`.
 -   **Functions Offered:**
     -   **Recipe Management:** Create, edit, delete, and publish/unpublish recipes.
     -   **Tip Management:** View and delete user-submitted tips.
-    -   **Community Management:** View all groups and moderate reported content (posts/comments) by dismissing reports or deleting the content.
+    -   **Community Management:** View all groups and moderate reported content by dismissing reports or deleting the content.
     -   **User Management:** View all users, inspect their activity, and perform moderation actions like suspending or deleting user accounts.
     -   **Analytics:** Displays charts and stats on total users, recipes, top-visited content, and more.
 
 ---
 
-## 7. Auth Pages (`/login`, `/signup`, `/verify-otp`)
+## 7. Auth Pages (`/login`, `/signup`, `/verify-otp`, etc.)
 
--   **Files:** `src/app/login/page.tsx`, `src/app/signup/page.tsx`, `src/app/verify-otp/page.tsx`
+-   **Files:** `src/app/login/page.tsx`, `src/app/signup/page.tsx`, `src/app/verify-otp/page.tsx`, `src/app/forgot-password/page.tsx`, `src/app/reset-password/page.tsx`
 -   **Technique:**
-    -   All are **Client Components** using `react-hook-form` and `zod` for robust validation.
-    -   All authentication logic is handled securely by **Server Actions** (`loginAction`, `signupAction`, `verifyOtpAction`).
-    -   The `loginAction` sets a secure, `httpOnly` cookie for session management.
-    -   The `signupAction` sends a verification email using the Resend service.
--   **Data Fetching:**
-    -   **Reads from/Writes to:** `users` table.
+    -   All are **Client Components** using `react-hook-form` and `zod` for robust client-side validation.
+    -   All authentication logic is handled securely by **Server Actions** (`loginAction`, `signupAction`, `verifyOtpAction`, etc.).
+    -   These actions are protected by the new IP-based **Rate Limiting** system to prevent brute-force attacks.
+    -   The `loginAction` sets a secure, `httpOnly` cookie containing a session token and invalidates all other active sessions for that user, a key security feature.
 -   **Functions Offered:**
-    -   `/login`: Allows existing users to sign in. Handles special admin login via environment variables.
+    -   `/login`: Allows existing users to sign in.
     -   `/signup`: Allows new users to create an account, which triggers an OTP verification email.
-    -   `/verify-otp`: Allows a new user to enter their 6-digit OTP to verify their email address and activate their account.
+    -   `/verify-otp`: Allows a new user to enter their 6-digit OTP to complete registration.
+    -   `/forgot-password`: Allows a user to request a password reset OTP.
+    -   `/reset-password`: Allows a user to set a new password using their email and OTP.

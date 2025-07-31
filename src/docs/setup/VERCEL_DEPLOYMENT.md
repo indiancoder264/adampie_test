@@ -1,3 +1,4 @@
+
 # How to Deploy to Vercel
 
 Vercel is the creator of Next.js and provides a seamless, zero-configuration hosting experience for Next.js applications. This guide will walk you through deploying your RecipeRadar project.
@@ -49,6 +50,12 @@ This is the most important step for connecting your database and email service s
 
     *   **Name:** `RESEND_API_KEY`
     *   **Value:** Paste your API key from Resend here.
+    
+    *   **Name:** `NEXT_PUBLIC_SUPABASE_URL`
+    *   **Value:** Paste your Supabase Project URL here.
+
+    *   **Name:** `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+    *   **Value:** Paste your Supabase `anon` `public` key here.
 
     *   **Name:** `NEXT_PUBLIC_BASE_URL`
     *   **Value:** Enter the final, public URL of your site (e.g., `https://my-recipe-app.vercel.app`). 

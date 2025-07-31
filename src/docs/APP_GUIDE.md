@@ -19,8 +19,9 @@ RecipeRadar is a feature-rich web application for discovering, sharing, and disc
 -   **TypeScript:** Adds static typing to JavaScript for improved code quality and robustness.
 -   **Tailwind CSS:** A utility-first CSS framework for rapid UI development.
 -   **ShadCN UI:** A collection of beautifully designed, accessible, and reusable UI components built on top of Tailwind CSS.
--   **PostgreSQL:** The application's relational database, managed via the `pg` library. The complete schema is designed for scalability and documented in `docs/DATABASE_SCHEMA.md`.
--   **Resend:** Used as the email provider for sending OTP verification emails during user signup.
+-   **PostgreSQL:** The application's relational database, managed via the `pg` library. The complete schema is designed for scalability and documented in `src/docs/DATABASE_SCHEMA.md`.
+-   **Resend:** Used as the email provider for sending OTP verification emails.
+-   **Supabase:** Provides the PostgreSQL database and real-time functionality for live UI updates.
 
 ---
 
@@ -28,60 +29,38 @@ RecipeRadar is a feature-rich web application for discovering, sharing, and disc
 
 ### Server-Side Data Fetching & Rendering
 
-To ensure fast load times and optimal SEO, the application primarily uses **Next.js Server Components**. Pages like the Homepage and Recipe Detail page are `async` components that fetch their data directly from the PostgreSQL database on the server using functions from `src/lib/data.ts`. The complete, content-rich HTML is then sent to the browser, making it immediately visible to users and search engines.
+To ensure fast load times and optimal SEO, the application primarily uses **Next.js Server Components**. The root layout (`src/app/layout.tsx`) is an `async` component that pre-fetches all critical data (users, recipes, groups) for the entire application on the server. This data is then passed down to client components via React Context.
 
 ### Data Mutations with Server Actions
 
-All actions that modify data (e.g., adding a recipe, deleting a user, posting a comment) are handled by **Next.js Server Actions** located in `src/lib/actions.ts`. This is a critical architectural and security feature. It ensures that all permission checks (e.g., "is this user an admin?") and data validation happen on the server, preventing unauthorized users from performing sensitive operations.
+All actions that modify data (e.g., adding a recipe, deleting a user, posting a comment) are handled by **Next.js Server Actions** located in `src/lib/actions.ts`. This is a critical architectural and security feature. Authorization is handled centrally within these actions using helper functions like `getAuthenticatedUser()` and `getAdminUser()`, ensuring that all permission checks and data validation happen securely on the server.
 
-### Client-Side State Management with React Context
+### Client-Side State Management & Real-Time Updates
 
-While most data is handled on the server, some global client-side state is managed using React's built-in **Context API**. This lightweight approach is used for data that needs to be shared across many components on the client, such as the current user's session.
-
--   **`src/lib/auth.tsx` (`AuthProvider`):** Manages the state of the currently logged-in user.
--   **`src/lib/recipes.tsx`, `src/lib/users.tsx`, `src/lib/community.tsx`:** These providers receive initial data fetched on the server and make it available to all client components, avoiding the need for redundant client-side fetching.
+-   **React Context:** Global client-side state is managed using React's built-in Context API. The `Providers` component in `src/app/providers.tsx` wraps the application and makes server-fetched data available to all client components.
+-   **Supabase Real-Time:** The application subscribes to database changes using Supabase. When the database is updated (e.g., a new group is created), Supabase sends a message to the client. The relevant Context Provider (e.g., `CommunityProvider`) listens for these messages and updates its state, causing the UI to re-render in real-time without needing a page refresh.
 
 ---
 
 ## 3. Data Source & Setup
 
-The application is powered by a **PostgreSQL database**. All data fetching is centralized in `src/lib/data.ts`, and all data mutations are handled by server actions in `src/lib/actions.ts`. The connection to the database is configured in `src/lib/db.ts` and relies on the `POSTGRES_URL` environment variable.
+The application is powered by a **PostgreSQL database**, hosted on Supabase.
 
-The complete database schema, including tables, columns, and relationships, is documented in `docs/DATABASE_SCHEMA.md`.
-
-For a quick setup, an executable SQL script is available at `database/schema.sql`. This script can be run directly in a PostgreSQL client (like the Supabase SQL Editor) to create all the necessary tables and functions.
+-   **Data Fetching:** All initial data fetching is centralized in `src/lib/data.ts`.
+-   **Data Mutations:** All writes to the database are handled by server actions in `src/lib/actions.ts`.
+-   **Connection:** The connection to the database is configured in `src/lib/db.ts` and relies on the `POSTGRES_URL` environment variable.
+-   **Schema:**
+    -   The complete database schema is documented in `src/docs/DATABASE_SCHEMA.md`.
+    -   The full, executable script to set up a new database from scratch is located at `database/schema.sql`.
 
 ---
 
 ## 4. Page Breakdown & Functionality
 
-The application uses the Next.js App Router, where each folder in `src/app/` corresponds to a URL path.
-
-| Page / Feature                | File Location                               | Description                                                                                                                                                                                            |
-| ----------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Homepage**                  | `src/app/page.tsx`                          | The main landing page. As a Server Component, it pre-renders a hero section, search bar, and carousels of trending and regional recipes. For logged-in users, it displays a personalized "Recommended For You" section based on their preferences. |
-| **Recipe Detail Page**        | `src/app/recipes/[id]/page.tsx`             | A Server Component that pre-renders all recipe details. Interactive elements like the "Favorite" button, a "Share to Community" feature, and the step-by-step cooking guide are handled by client components.  |
-| **User Profile**              | `src/app/profile/page.tsx`                  | A client-side page allowing a logged-in user to view and edit their profile, see their favorite recipes, manage preferred cuisines, and track their community activity and earned achievements. |
-| **Cuisine-Specific Page**     | `src/app/cuisine/[region]/page.tsx`         | A page that lists all recipes for a specific cuisine. The list of recipes is fetched and rendered on the server.                                                                                       |
-| **Login & Signup**            | `src/app/login/page.tsx` & `signup/page.tsx`| Secure forms that use Server Actions (`loginAction`, `signupAction`) to handle authentication against the database. Signup initiates an OTP email verification process.                                    |
-| **Verify OTP**                | `src/app/verify-otp/page.tsx`               | A page where new users enter the 6-digit One-Time Password sent to their email to complete the registration process and verify their account.                                                        |
-| **Community Hub**             | `src/app/community/page.tsx`                | The main entry point for the community section. It displays a tabbed interface for a logged-in user to see groups they've created, groups they are a member of, and to explore all other available groups. |
-| **Group Detail Page**         | `src/app/community/[id]/page.tsx`           | The discussion board for a single group. All interactions (creating posts, sharing recipes, commenting, reacting, reporting) are handled by secure Server Actions that update the database in real-time.                             |
-| **Admin Dashboard**           | `src/app/admin/page.tsx`                    | A protected page for administrators. Login is handled via special environment variables. All functions—managing recipes, moderating users, viewing analytics, and overseeing community groups—are directly connected to the database via server actions.     |
-| **Sitemap**                   | `src/app/sitemap.ts`                        | A special file that dynamically generates a `sitemap.xml` file by fetching all published recipes and groups from the database, ensuring search engines can efficiently index the entire site.           |
+A detailed breakdown of each page's technical implementation can be found in `src/docs/implementation.md`.
 
 ---
 
-## 5. Key Components
+## 5. File Structure
 
-While there are many components, here are a few of the most important ones:
-
-| Component                 | File Location                       | Description                                                                                                          |
-| ------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Header & Footer**       | `src/components/layout/`            | The main navigation and footer for the site. The header dynamically shows links based on the user's auth state.      |
-| **RecipeCard**            | `src/components/recipe-card.tsx`    | A reusable card component used to display a recipe's summary on the homepage and other listing pages.                |
-| **RecipeInteraction**     | `src/components/recipe-interaction.tsx` | A client component that manages all interactive parts of the recipe page, including the cooking guide and tip submission. |
-| **ShadCN UI Components**  | `src/components/ui/`                | The base UI components like `Button`, `Card`, `Input`, etc., that form the application's design system.              |
-| **Admin Components**      | `src/components/admin/`             | Components specifically built for the various tabs within the Admin Dashboard, all powered by server actions.        |
-
-This guide should provide a solid foundation for understanding how the RecipeRadar application is built and where to find the relevant code for each piece of its functionality.
+A comprehensive guide to the project's file structure can be found in `src/docs/FILE_STRUCTURE.md`.
