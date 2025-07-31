@@ -1,15 +1,9 @@
--- This script contains the complete SQL schema for the RecipeRadar application.
--- It can be executed directly in a PostgreSQL client (like psql or the Supabase SQL Editor)
--- to set up all necessary tables, types, functions, and triggers.
+-- RecipeRadar Full Database Schema
+-- This script can be run to set up the entire database from scratch.
 
--- Enable the pgcrypto extension if not already enabled, for gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- ========= FUNCTIONS & TRIGGERS =========
 
--- ####################################################################
--- # 1. Automated Triggers & Functions
--- ####################################################################
-
--- Function to automatically update the 'updated_at' column on row modification
+-- Function to automatically update 'updated_at' timestamps
 CREATE OR REPLACE FUNCTION update_modified_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -18,11 +12,10 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Function to update denormalized recipe ratings when a tip is added, updated, or deleted
+-- Function to denormalize and update average ratings on the recipes table
 CREATE OR REPLACE FUNCTION update_recipe_rating()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Handle DELETE operation
     IF (TG_OP = 'DELETE') THEN
         UPDATE recipes
         SET
@@ -30,7 +23,6 @@ BEGIN
             average_rating = COALESCE((SELECT AVG(rating) FROM tips WHERE recipe_id = OLD.recipe_id), 0)
         WHERE id = OLD.recipe_id;
         RETURN OLD;
-    -- Handle INSERT or UPDATE operation
     ELSE
         UPDATE recipes
         SET
@@ -42,29 +34,19 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-
--- ####################################################################
--- # 2. Enums (Custom Types)
--- ####################################################################
-
--- Enum for user dietary preferences
-CREATE TYPE dietary_preference_enum AS ENUM ('All', 'Vegetarian', 'Non-Vegetarian', 'Vegan');
-
--- Enum for recipe dietary types
-CREATE TYPE dietary_type_enum AS ENUM ('Vegetarian', 'Non-Vegetarian', 'Vegan');
-
--- Enum for post reaction types
-CREATE TYPE reaction_type AS ENUM ('like', 'dislike');
-
--- Enum for reportable content types
-CREATE TYPE reportable_content_type AS ENUM ('post', 'comment');
+-- Function to automatically clean up old rate limit records
+CREATE OR REPLACE FUNCTION delete_old_rate_limits()
+RETURNS TRIGGER AS $$
+BEGIN
+  DELETE FROM rate_limits WHERE created_at < NOW() - INTERVAL '1 hour';
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 
--- ####################################################################
--- # 3. Tables
--- ####################################################################
+-- ========= TABLE DEFINITIONS =========
 
--- Stores user information and credentials
+-- Table for users and authentication
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
@@ -75,50 +57,40 @@ CREATE TABLE users (
     country VARCHAR(100),
     dietary_preference VARCHAR(50) CHECK (dietary_preference IN ('All', 'Vegetarian', 'Non-Vegetarian', 'Vegan')),
     avatar_seed VARCHAR(255) NOT NULL,
-    
-    -- Email Verification Fields
     is_verified BOOLEAN DEFAULT FALSE,
     verification_otp CHAR(6),
     verification_otp_expires TIMESTAMPTZ,
     verification_emails_sent SMALLINT DEFAULT 0,
     last_verification_email_sent_at TIMESTAMPTZ,
-    
-    -- Email Change Fields
     pending_new_email VARCHAR(255),
     new_email_otp CHAR(6),
     new_email_otp_expires TIMESTAMPTZ,
     new_email_requests_sent SMALLINT DEFAULT 0,
     last_new_email_request_at TIMESTAMPTZ,
-
-    -- Password Reset Fields
     password_reset_token CHAR(6),
     password_reset_token_expires TIMESTAMPTZ,
     password_reset_requests_sent SMALLINT DEFAULT 0,
     last_password_reset_request_at TIMESTAMPTZ,
-    
-    -- Rate Limiting Fields
     password_change_attempts SMALLINT DEFAULT 0,
     last_password_attempt_at TIMESTAMPTZ,
     name_last_changed_at TIMESTAMPTZ,
-
-    -- Engagement & Personalization Fields
     read_history UUID[] DEFAULT ARRAY[]::UUID[],
     achievements TEXT[] DEFAULT ARRAY[]::TEXT[],
-    
-    -- General Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores active user sessions
+-- Table for user sessions
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
+    user_agent TEXT,
+    ip_address VARCHAR(45),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores core recipe data
+-- Table for recipes
 CREATE TABLE recipes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -139,7 +111,7 @@ CREATE TABLE recipes (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores ingredients for each recipe
+-- Table for ingredients
 CREATE TABLE ingredients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -148,7 +120,7 @@ CREATE TABLE ingredients (
     display_order SMALLINT NOT NULL
 );
 
--- Stores cooking steps for each recipe
+-- Table for cooking steps
 CREATE TABLE steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -157,7 +129,7 @@ CREATE TABLE steps (
     UNIQUE(recipe_id, step_number)
 );
 
--- Stores user-submitted tips and ratings for recipes
+-- Table for user-submitted tips and ratings
 CREATE TABLE tips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -169,7 +141,7 @@ CREATE TABLE tips (
     UNIQUE(user_id, recipe_id)
 );
 
--- Junction table for user's favorite recipes
+-- Junction table for user favorites
 CREATE TABLE user_favorites (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -177,14 +149,14 @@ CREATE TABLE user_favorites (
     PRIMARY KEY (user_id, recipe_id)
 );
 
--- Junction table for user's favorite cuisines
+-- Junction table for user favorite cuisines
 CREATE TABLE user_favorite_cuisines (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     region VARCHAR(100) NOT NULL,
     PRIMARY KEY (user_id, region)
 );
 
--- Stores community group information
+-- Table for community groups
 CREATE TABLE groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
@@ -202,7 +174,7 @@ CREATE TABLE group_members (
     PRIMARY KEY (user_id, group_id)
 );
 
--- Stores posts made within a group
+-- Table for posts within groups
 CREATE TABLE posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -213,7 +185,7 @@ CREATE TABLE posts (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores comments on posts
+-- Table for comments on posts
 CREATE TABLE comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -223,7 +195,8 @@ CREATE TABLE comments (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Stores reactions (likes/dislikes) on posts
+-- Table for post reactions (likes/dislikes)
+CREATE TYPE reaction_type AS ENUM ('like', 'dislike');
 CREATE TABLE post_reactions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -232,7 +205,8 @@ CREATE TABLE post_reactions (
     PRIMARY KEY (user_id, post_id)
 );
 
--- Stores reports for various content types
+-- Table for content reports
+CREATE TYPE reportable_content_type AS ENUM ('post', 'comment');
 CREATE TABLE reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -244,85 +218,100 @@ CREATE TABLE reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ####################################################################
--- # 4. Indexes
--- ####################################################################
+-- Table for IP-based rate limiting
+CREATE TABLE rate_limits (
+    id SERIAL PRIMARY KEY,
+    ip_address VARCHAR(45) NOT NULL,
+    action_type VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
 
--- Indexes for 'users' table
+
+-- ========= INDEXES =========
+
+-- Users table indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_verification_otp ON users(verification_otp);
 CREATE INDEX idx_users_new_email_otp ON users(new_email_otp);
 CREATE INDEX idx_users_password_reset_token ON users(password_reset_token);
 CREATE INDEX idx_users_read_history ON users USING GIN(read_history);
 
--- Index for 'sessions' table
+-- Sessions table index
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 
--- Index for 'recipes' table
+-- Recipes table index
 CREATE INDEX idx_recipes_region ON recipes(region);
 
--- Index for 'ingredients' table
+-- Ingredients table index
 CREATE INDEX idx_ingredients_recipe_id ON ingredients(recipe_id);
 
--- Index for 'steps' table
+-- Steps table index
 CREATE INDEX idx_steps_recipe_id_step_number ON steps(recipe_id, step_number);
 
--- Indexes for 'tips' table
+-- Tips table indexes
 CREATE INDEX idx_tips_recipe_id ON tips(recipe_id);
 CREATE INDEX idx_tips_user_id ON tips(user_id);
 
--- Index for 'posts' table
+-- Posts table index
 CREATE INDEX idx_posts_group_id ON posts(group_id);
 
--- Index for 'comments' table
+-- Comments table index
 CREATE INDEX idx_comments_post_id ON comments(post_id);
 
--- Index for 'reports' table
+-- Reports table index
 CREATE INDEX idx_reports_content ON reports(content_type, content_id);
 
+-- Rate limits table index
+CREATE INDEX idx_rate_limits_ip_action_time ON rate_limits (ip_address, action_type, created_at);
 
--- ####################################################################
--- # 5. Triggers
--- ####################################################################
 
--- Trigger to auto-update the 'updated_at' column for the 'users' table
+-- ========= TRIGGERS =========
+
+-- Trigger for users table
 CREATE TRIGGER update_users_modtime
     BEFORE UPDATE ON users
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
 
--- Trigger for 'recipes' table
+-- Trigger for recipes table
 CREATE TRIGGER update_recipes_modtime
     BEFORE UPDATE ON recipes
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
 
--- Trigger for 'tips' table
+-- Trigger for tips table (updated_at)
 CREATE TRIGGER update_tips_modtime
     BEFORE UPDATE ON tips
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
 
--- Trigger to update recipe ratings when a tip changes
+-- Trigger for tips table (recipe rating)
 CREATE TRIGGER update_rating_on_tip_change
     AFTER INSERT OR UPDATE OR DELETE ON tips
     FOR EACH ROW
     EXECUTE FUNCTION update_recipe_rating();
 
--- Trigger for 'groups' table
+-- Trigger for groups table
 CREATE TRIGGER update_groups_modtime
     BEFORE UPDATE ON groups
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
 
--- Trigger for 'posts' table
+-- Trigger for posts table
 CREATE TRIGGER update_posts_modtime
     BEFORE UPDATE ON posts
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
 
--- Trigger for 'comments' table
+-- Trigger for comments table
 CREATE TRIGGER update_comments_modtime
     BEFORE UPDATE ON comments
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
+
+-- Trigger for rate_limits table
+CREATE TRIGGER trigger_delete_old_rate_limits
+    AFTER INSERT ON rate_limits
+    FOR EACH ROW
+    EXECUTE FUNCTION delete_old_rate_limits();
+

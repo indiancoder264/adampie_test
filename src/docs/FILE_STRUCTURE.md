@@ -9,15 +9,7 @@ This document outlines the file and folder structure for the RecipeRadar applica
 ├── .vscode/
 │   └── settings.json     # VSCode editor settings
 ├── database/
-│   └── schema.sql        # Executable SQL script to set up the entire database
-├── docs/
-│   ├── setup/
-│   │   ├── RESEND_SETUP.md       # Guide for connecting the Resend email provider
-│   │   ├── SUPABASE_SETUP.md     # Guide for connecting to a Supabase database
-│   │   └── VERCEL_DEPLOYMENT.md  # Guide for deploying the application to Vercel
-│   ├── APP_GUIDE.md      # Detailed application architecture and feature guide
-│   ├── DATABASE_SCHEMA.md # PostgreSQL database schema design
-│   └── FILE_STRUCTURE.md # This file, outlining the project structure
+│   └── schema.sql        # Executable SQL script to set up the entire database from scratch
 ├── README.md             # Basic project README
 ├── apphosting.yaml       # Firebase App Hosting configuration
 ├── components.json       # Configuration for ShadCN UI components
@@ -41,12 +33,14 @@ This document outlines the file and folder structure for the RecipeRadar applica
     │   │   └── page.tsx  # Contact Us page
     │   ├── cuisine/
     │   │   └── [region]/
-    │   │       └── page.tsx # Page displaying all recipes for a specific cuisine (Server Component)
+    │   │       └── page.tsx # Page displaying all recipes for a specific cuisine
+    │   ├── forgot-password/
+    │   │   └── page.tsx  # Page for initiating a password reset
     │   ├── globals.css     # Global styles and Tailwind directives
     │   ├── layout.tsx      # Root layout (Server Component that fetches initial data)
     │   ├── login/
     │   │   └── page.tsx  # Login page (Client Component using a Server Action)
-    │   ├── page.tsx        # Homepage (Server Component)
+    │   ├── page.tsx        # Homepage
     │   ├── privacy/
     │   │   └── page.tsx  # Privacy Policy page
     │   ├── profile/
@@ -54,7 +48,9 @@ This document outlines the file and folder structure for the RecipeRadar applica
     │   ├── providers.tsx   # Aggregates all React Context providers for client-side state
     │   ├── recipes/
     │   │   └── [id]/
-    │   │       └── page.tsx # Recipe detail page (Server Component)
+    │   │       └── page.tsx # Recipe detail page
+    │   ├── reset-password/
+    │   │   └── page.tsx  # Page for completing a password reset with an OTP
     │   ├── signup/
     │   │   └── page.tsx  # Signup page (Client Component using a Server Action)
     │   ├── sitemap.ts      # Dynamically generates sitemap.xml on build
@@ -70,6 +66,17 @@ This document outlines the file and folder structure for the RecipeRadar applica
     │   ├── search-and-filter.tsx  # Client component for the homepage search bar
     │   ├── star-rating.tsx # Component for displaying/interacting with star ratings
     │   └── ui/             # ShadCN UI components (Button, Card, etc.)
+    ├── docs/               # Project documentation
+    │   ├── setup/
+    │   │   ├── DATABASE_MIGRATIONS.md
+    │   │   ├── RESEND_SETUP.md
+    │   │   ├── SUPABASE_SETUP.md
+    │   │   └── VERCEL_DEPLOYMENT.md
+    │   ├── APP_GUIDE.md
+    │   ├── DATABASE_SCHEMA.md
+    │   ├── FILE_STRUCTURE.md
+    │   ├── implementation.md
+    │   └── vulnerabilities.md
     ├── hooks/              # Custom React hooks (e.g., use-toast, use-mobile)
     │   ├── use-mobile.tsx
     │   └── use-toast.ts
@@ -79,7 +86,9 @@ This document outlines the file and folder structure for the RecipeRadar applica
         ├── community.tsx   # Community Context provider
         ├── data.ts         # Server-side functions for fetching data from the database
         ├── db.ts           # PostgreSQL database connection pool setup
+        ├── rate-limiter.ts # IP-based rate limiting service
         ├── recipes.tsx     # Recipes Context provider
+        ├── supabase.ts     # Supabase client initialization
         ├── users.tsx       # Users Context provider
         └── utils.ts        # Utility functions (e.g., cn for Tailwind classes)
 ```

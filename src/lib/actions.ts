@@ -2,7 +2,7 @@
 
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import getPool from './db';
 import type { User } from "./auth";
@@ -14,6 +14,7 @@ import { Resend } from 'resend';
 import { redirect } from "next/navigation";
 import { fetchUserById } from "./data";
 import { randomUUID } from "crypto";
+import { checkRateLimit } from "./rate-limiter";
 
 
 // --- Helper Functions ---
@@ -21,15 +22,38 @@ import { randomUUID } from "crypto";
 /**
  * Creates a new session for a user and sets the session cookie.
  */
-async function createSession(userId: string) {
+async function createSession(userId: string, currentSessionId?: string) {
     const pool = getPool();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
     const sessionToken = randomUUID();
+    const userAgent = (await headers()).get('user-agent');
+    const ipAddress = (await headers()).get('x-forwarded-for')?.split(',')[0].trim() || (await headers()).get('x-real-ip')?.trim();
 
-    await pool.query(
-        'INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)',
-        [sessionToken, userId, expiresAt]
-    );
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // Invalidate all other sessions for this user for security
+        if (currentSessionId) {
+            await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [userId, currentSessionId]);
+        } else {
+            await client.query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+        }
+
+        await client.query(
+            'INSERT INTO sessions (id, user_id, expires_at, user_agent, ip_address) VALUES ($1, $2, $3, $4, $5)',
+            [sessionToken, userId, expiresAt, userAgent, ipAddress]
+        );
+        await client.query('COMMIT');
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Failed to create session and clear old ones:", error);
+        throw new Error("Session creation failed.");
+    } finally {
+        client.release();
+    }
+
 
     (await cookies()).set("session_token", sessionToken, {
         httpOnly: true,
@@ -38,6 +62,7 @@ async function createSession(userId: string) {
         sameSite: 'lax',
         path: '/',
     });
+    return sessionToken;
 }
 
 /**
@@ -68,7 +93,7 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
             from: 'RecipeRadar <onboarding@resend.dev>',
             // The line below is a temporary workaround for development.
             // When a custom domain is configured with Resend, replace it with the commented-out line below.
-            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
+            to: 'Bobby.ch6969@gmail.com',
             // to: email,
             subject: subject,
             html: htmlContent,
@@ -123,6 +148,7 @@ async function getAdminUser(): Promise<User> {
 
 // --- Auth Actions ---
 export async function loginAction(data: { email: string; password: string;}) {
+    await checkRateLimit('login_attempt');
     const { email, password } = data;
     
     const pool = getPool();
@@ -154,6 +180,9 @@ export async function loginAction(data: { email: string; password: string;}) {
 
     } catch (error) {
         console.error(error);
+        if (error instanceof Error && error.message.startsWith('Rate limit exceeded')) {
+             return { success: false, error: error.message };
+        }
         return { success: false, error: "An unexpected error occurred. Please try again." };
     } finally {
         client.release();
@@ -172,6 +201,7 @@ export async function logoutAction() {
 }
 
 export async function signupAction(data: {name: string, email: string, password: string, country: string, dietaryPreference: string}) {
+  await checkRateLimit('signup_attempt');
   const { name, email, password, country, dietaryPreference } = data;
   const pool = getPool();
   const client = await pool.connect();
@@ -257,6 +287,9 @@ export async function signupAction(data: {name: string, email: string, password:
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error(error);
+    if (error.message.startsWith('Rate limit exceeded')) {
+        return { success: false, error: error.message };
+    }
     if (error.message.includes("Could not send verification email")) {
         return { success: false, error: "Account created, but failed to send verification email. Please contact support." };
     }
@@ -299,6 +332,7 @@ export async function verifyOtpAction(email: string, otp: string) {
 }
 
 export async function requestPasswordResetAction(email: string) {
+    await checkRateLimit('otp_request');
     const pool = getPool();
     const client = await pool.connect();
     try {
@@ -350,6 +384,9 @@ export async function requestPasswordResetAction(email: string) {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error("Error in requestPasswordResetAction:", error);
+         if (error instanceof Error && error.message.startsWith('Rate limit exceeded')) {
+             return { success: false, error: error.message };
+        }
         return { success: false, error: "An unexpected error occurred. Please try again." };
     } finally {
         client.release();
@@ -1094,14 +1131,12 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
             [newPasswordHash, user.id]
         );
 
-        // Invalidate all sessions for this user for security
-        await client.query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
+        // Invalidate all sessions for this user for security, except the current one
+        const currentSessionId = (await cookies()).get('session_token')?.value;
+        await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [user.id, currentSessionId]);
         
         await client.query('COMMIT');
         
-        // Create a new session for the current device
-        await createSession(user.id);
-
         revalidatePath('/profile');
         return { success: true };
     } catch (error) {
