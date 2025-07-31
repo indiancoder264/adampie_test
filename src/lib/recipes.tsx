@@ -87,7 +87,9 @@ export const RecipeProvider = ({ children, initialRecipes: serverRecipes }: { ch
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 
