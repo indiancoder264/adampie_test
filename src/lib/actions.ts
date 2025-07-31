@@ -68,7 +68,7 @@ async function sendEmail(email: string, subject: string, htmlContent: string) {
             from: 'RecipeRadar <onboarding@resend.dev>',
             // The line below is a temporary workaround for development.
             // When a custom domain is configured with Resend, replace it with the commented-out line below.
-            to: 'Bobby.ch6969@gmail.com',
+            to: process.env.RESEND_TO_EMAIL || 'bobby.ch6969@gmail.com',
             // to: email,
             subject: subject,
             html: htmlContent,
