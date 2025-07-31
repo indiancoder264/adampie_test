@@ -1,3 +1,4 @@
+
 import getPool from './db';
 import { headers } from 'next/headers';
 
@@ -12,12 +13,13 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   otp_request: { limit: 5, window: 60 * 10 }, // 5 requests per 10 minutes
 };
 
-function getIpAddress(): string | null {
-  const forwardedFor = headers().get('x-forwarded-for');
+async function getIpAddress(): Promise<string | null> {
+  const headersList = await headers();
+  const forwardedFor = headersList.get('x-forwarded-for');
   if (forwardedFor) {
     return forwardedFor.split(',')[0].trim();
   }
-  const realIp = headers().get('x-real-ip');
+  const realIp = headersList.get('x-real-ip');
   if (realIp) {
     return realIp.trim();
   }
@@ -25,7 +27,7 @@ function getIpAddress(): string | null {
 }
 
 export async function checkRateLimit(actionType: keyof typeof rateLimitConfigs) {
-  const ip = getIpAddress();
+  const ip = await getIpAddress();
   if (!ip) {
     // If we can't get an IP, we can't rate limit.
     // In a production environment, you should ensure your proxy setup (e.g., Vercel) correctly sets these headers.

@@ -26,8 +26,9 @@ async function createSession(userId: string, currentSessionId?: string) {
     const pool = getPool();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
     const sessionToken = randomUUID();
-    const userAgent = (await headers()).get('user-agent');
-    const ipAddress = (await headers()).get('x-forwarded-for')?.split(',')[0].trim() || (await headers()).get('x-real-ip')?.trim();
+    const headersList = await headers();
+    const userAgent = headersList.get('user-agent');
+    const ipAddress = headersList.get('x-forwarded-for')?.split(',')[0].trim() || headersList.get('x-real-ip')?.trim();
 
     const client = await pool.connect();
     try {
@@ -1132,7 +1133,8 @@ export async function changePasswordAction(data: {currentPassword: string, newPa
         );
 
         // Invalidate all sessions for this user for security, except the current one
-        const currentSessionId = (await cookies()).get('session_token')?.value;
+        const cookieStore = await cookies();
+        const currentSessionId = cookieStore.get('session_token')?.value;
         await client.query('DELETE FROM sessions WHERE user_id = $1 AND id != $2', [user.id, currentSessionId]);
         
         await client.query('COMMIT');
