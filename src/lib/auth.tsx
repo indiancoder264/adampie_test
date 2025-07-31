@@ -51,7 +51,7 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${initialUser.id}` },
-        (payload) => {
+        (payload: { new: Partial<User>; }) => {
             console.log('User data changed!', payload.new);
             // This is a simplified update. A real implementation might need more sophisticated merging.
             setUser(prevUser => {
@@ -64,7 +64,9 @@ export const AuthProvider = ({ children, initialUser }: { children: ReactNode; i
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [initialUser]);
 
